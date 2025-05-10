@@ -99,13 +99,72 @@ with tabs[3]:
 # 🤖 Tab 5: Autonomous Workflow
 # -------------------------------
 with tabs[4]:
-    st.header("🤖 DebugIQ Agent Workflow")
-    wf = requests.get(f"{BACKEND_URL}/autonomous_workflow")
-    if wf.status_code == 200:
-        st.json(wf.json())
-    else:
-        st.error("Workflow agent not responding.")
+    st.header("🤖 DebugIQ Autonomous Agent Workflow")
+    st.markdown("""
+    This agentic workflow runs the entire pipeline:
+    - 🧾 Fetches issue details
+    - 🕵️ Diagnoses root cause
+    - 🛠 Suggests a patch
+    - 🔬 Validates the patch
+    - 📦 Creates a pull request
+    - 🧠 Updates agent status live
+    """)
 
+    issue_id = st.text_input("Enter Issue ID", placeholder="e.g. ISSUE-101")
+
+    # Visual progress UI map
+    progress_labels = [
+        "🧾 Fetching Details",
+        "🕵️ Diagnosis",
+        "🛠 Patch Suggestion",
+        "🔬 Patch Validation",
+        "✅ Patch Confirmed",
+        "📦 PR Created"
+    ]
+    progress_status_map = {
+        "Fetching Details": 0,
+        "Diagnosis in Progress": 1,
+        "Patch Suggestion in Progress": 2,
+        "Patch Validation in Progress": 3,
+        "Patch Validated": 4,
+        "PR Created - Awaiting Review/QA": 5
+    }
+
+    def show_agent_progress(status: str):
+        step = progress_status_map.get(status, 0)
+        st.progress((step + 1) / len(progress_labels))
+        for i, label in enumerate(progress_labels):
+            prefix = "✅" if i <= step else "🔄"
+            st.markdown(f"{prefix} {label}")
+
+    if st.button("▶️ Run DebugIQ Workflow"):
+        if not issue_id:
+            st.warning("Please enter a valid issue ID.")
+        else:
+            with st.spinner("Running DebugIQ agents..."):
+                try:
+                    response = requests.post(
+                        f"{BACKEND_URL}/run_autonomous_workflow",
+                        json={"issue_id": issue_id}
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        status = result.get("status", "Diagnosis in Progress")
+                        show_agent_progress(status)
+
+                        if "pull_request" in result:
+                            pr_url = result["pull_request"].get("url")
+                            if pr_url:
+                                st.success(f"✅ Pull Request Created: [View PR]({pr_url})")
+                        st.subheader("🧾 Full Result")
+                        st.json(result)
+
+                    else:
+                        st.error("❌ Workflow error from backend.")
+                        st.json(response.json())
+
+                except Exception as e:
+                    st.exception(e)
 # -------------------------------
 # 🔍 Tab 6: Workflow Check
 # -------------------------------
