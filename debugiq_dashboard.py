@@ -117,28 +117,28 @@ with tabs[5]:
     else:
         st.warning("Workflow status unavailable.")
 
-# -------------------------------
-# 🎙️ DebugIQ Voice (Gemini + GPT-4o fallback)
-# -------------------------------
+# 🎙️ DebugIQ Voice – Voice & Text Command Processing
+
 st.markdown("---")
-st.subheader("🎙️ DebugIQ Voice — Agentic Assistant (Text + Voice Input)")
+st.subheader("🎙️ DebugIQ Voice — Agentic Assistant")
+
 voice_col, text_col = st.columns(2)
 
 with voice_col:
     st.markdown("**🎧 Upload Command Audio (.wav)**")
     audio = st.file_uploader("Upload voice command", type=["wav"])
-    # Placeholder response — to be wired to Gemini
-    if audio:
-        st.success("Audio uploaded — Gemini processing placeholder active")
+    if audio and st.button("Send Audio to DebugIQ Voice"):
+        with st.spinner("Processing voice via Gemini..."):
+            result = process_voice_file(audio.read())
+            st.success("🔊 Voice processed")
+            st.json(result)
 
 with text_col:
     st.markdown("**🗣️ Text Command to DebugIQ Voice**")
-    command = st.text_input("What do you want DebugIQ to do?")
-    fallback = st.checkbox("Fallback to GPT-4o if Gemini unavailable", value=True)
-
-    if st.button("Send to DebugIQ Voice"):
-        st.markdown("⏳ Processing command...")
-        response_text = "✔️ Command processed by DebugIQ Voice (Gemini)."
-        if fallback:
-            response_text += "\nFallback GPT-4o engaged if Gemini fails."
-        st.success(response_text)
+    cmd = st.text_input("Enter your request...")
+    fallback = st.checkbox("Fallback to GPT-4o", value=True)
+    if st.button("Send Text to DebugIQ Voice"):
+        with st.spinner("Processing text via Gemini..."):
+            result = process_text_command(cmd, fallback_model="gpt-4o" if fallback else "gemini-pro")
+            st.success("🧠 Command interpreted")
+            st.json(result)
