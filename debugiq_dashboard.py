@@ -4,6 +4,7 @@ import streamlit as st
 import requests
 from streamlit_ace import st_ace
 import difflib
+from debugiq_gemini_voice import process_voice_file, process_text_command
 
 # --- Branding + Config ---
 PROJECT_NAME = "DebugIQ"
