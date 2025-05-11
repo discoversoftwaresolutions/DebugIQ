@@ -6,6 +6,7 @@ import difflib
 from debugiq_gemini_voice import process_voice_file, process_text_command
 import pandas as pd
 import plotly.express as px# --- Branding + Config ---
+from streamlit_autorefresh import st_autorefresh
 
 PROJECT_NAME = "DebugIQ"
 BACKEND_URL = "https://autonomous-debug.onrender.com"
