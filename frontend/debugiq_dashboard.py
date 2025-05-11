@@ -1,12 +1,12 @@
 # debugiq_dashboard.py
-
 import streamlit as st
 import requests
 from streamlit_ace import st_ace
 import difflib
 from debugiq_gemini_voice import process_voice_file, process_text_command
+import pandas as pd
+import plotly.express as px# --- Branding + Config ---
 
-# --- Branding + Config ---
 PROJECT_NAME = "DebugIQ"
 BACKEND_URL = "https://autonomous-debug.onrender.com"
 REPO_LINKS = {
@@ -205,6 +205,38 @@ with tabs[5]:
         st.json(check.json())
     else:
         st.warning("Workflow status unavailable.")
+
+elif selected_tab == "📊 Metrics":
+    METRICS_API_URL = "http://0.0.0.0:8000/metrics/status"  # Or your deployed backend
+
+    st.header("📊 Agent + Workflow Metrics")
+
+    with st.spinner("Fetching metrics from backend..."):
+        try:
+            response = requests.get(METRICS_API_URL, timeout=5)
+            data = response.json()
+
+            # Agent Call Chart
+            if "agent_calls" in data:
+                agent_df = pd.DataFrame(
+                    list(data["agent_calls"].items()), columns=["Agent Task", "Calls"]
+                )
+                st.subheader("Agent Call Volume")
+                st.plotly_chart(px.bar(agent_df, x="Agent Task", y="Calls", color="Agent Task"))
+
+            # Workflow Status Pie
+            if "workflow_status" in data:
+                status_df = pd.DataFrame(
+                    list(data["workflow_status"].items()), columns=["Status", "Count"]
+                )
+                st.subheader("Workflow Status Distribution")
+                st.plotly_chart(px.pie(status_df, names="Status", values="Count", hole=0.4))
+
+            st.markdown(f"**Total Issues Tracked:** `{data.get('issue_count', 0)}`")
+            st.markdown(f"**Last Updated:** `{data.get('last_updated')}`")
+
+        except Exception as e:
+            st.error(f"Failed to load metrics: {e}")
 
 # 🎙️ DebugIQ Voice – Voice & Text Command Processing
 
