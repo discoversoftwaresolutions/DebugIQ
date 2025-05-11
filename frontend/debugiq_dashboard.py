@@ -204,9 +204,13 @@ with tabs[5]:
     if check.status_code == 200:
         st.json(check.json())
      
-    with tabs[6]:  # <- this is your Metrics tab container
+with tabs[6]:
     st_autorefresh(interval=30 * 1000, key="autorefresh_metrics")
     st.header("📊 Agent + Workflow Metrics")
+    
+
+    
+   # (rest of your metrics logic indented here...)
     ...
     with st.spinner("Fetching metrics from backend..."):
         try:
