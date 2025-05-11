@@ -6,3 +6,4 @@ numpy
 av
 requests
 difflib-html
+streamlit-autorefresh
