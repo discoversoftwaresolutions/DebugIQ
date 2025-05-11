@@ -6,8 +6,6 @@ from openai import OpenAI
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# ✅ GPT-4o text client
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 # -----------------------------
 # 🎙️ Gemini Voice Processing
@@ -65,7 +63,11 @@ def process_text_command(prompt: str) -> dict:
     Processes a typed text command using OpenAI GPT-4o.
     """
     try:
-        response = openai_client.chat.completions.create(
+        client = OpenAI()
+
+def query_openai(prompt: str) -> dict:
+    try:
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7
@@ -73,8 +75,7 @@ def process_text_command(prompt: str) -> dict:
         reply = response.choices[0].message.content
         return {"model": "gpt-4o", "response": reply}
     except Exception as e:
-        return {"error": f"OpenAI GPT-4o error: {str(e)}"}
-
+        return {"error": f"OpenAI error: {str(e)}"}
 
 # -----------------------------
 # 🧠 Gemini Direct (Used for Voice Transcript Response)
