@@ -203,14 +203,11 @@ with tabs[5]:
     check = requests.get(f"{BACKEND_URL}/workflow_check")
     if check.status_code == 200:
         st.json(check.json())
-    else:
-        st.warning("Workflow status unavailable.")
-
-elif selected_tab == "📊 Metrics":
-    METRICS_API_URL = "http://0.0.0.0:8000/metrics/status"  # Or your deployed backend
-
+     
+    with tabs[6]:  # <- this is your Metrics tab container
+    st_autorefresh(interval=30 * 1000, key="autorefresh_metrics")
     st.header("📊 Agent + Workflow Metrics")
-
+    ...
     with st.spinner("Fetching metrics from backend..."):
         try:
             response = requests.get(METRICS_API_URL, timeout=5)
