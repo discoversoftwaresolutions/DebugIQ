@@ -28,10 +28,40 @@ st.title("🧠 DebugIQ Agentic Dashboard")
 st.markdown("A unified agent interface for autonomous debugging, documentation, QA, and workflow orchestration.")
 
 # --- Tabs ---
-tabs = st.tabs([
-    "📄 Trace + Patch", "✅ QA", "📘 Documentation",
-    "📣 Issue Notices", "🤖 Autonomous Workflow", "🔍 Workflow Check"
-])
+with tabs[0]:
+    st.header("📄 Traceback + Patch (DebugIQanalyze)")
+    uploaded_file = st.file_uploader("Upload traceback or .py file", type=["py", "txt"])
+
+    if uploaded_file:
+        original_code = uploaded_file.read().decode("utf-8")
+        st.code(original_code, language="python")
+
+        if st.button("🧠 Suggest Patch"):
+            with st.spinner("Calling DebugIQanalyze..."):
+                res = requests.post(f"{BACKEND_URL}/debugiq/suggest_patch", json={"code": original_code})
+                if res.status_code == 200:
+                    patch = res.json()
+                    patched_code = patch.get("patched_code", "") or patch.get("suggested_patch", "")
+                    patch_diff = patch.get("diff", "")
+
+                    st.markdown("### 🔍 Diff View")
+                    html_diff = difflib.HtmlDiff().make_file(
+                        original_code.splitlines(),
+                        patched_code.splitlines(),
+                        fromdesc="Original",
+                        todesc="Patched"
+                    )
+                    st.components.v1.html(html_diff, height=450, scrolling=True)
+
+                    st.markdown("### ✍️ Edit Patch (Live)")
+                    edited_code = st_ace(value=patched_code, language="python", theme="monokai", height=300)
+                    
+                    # Store edited code in session state for QA / Docs tabs
+                    st.session_state.edited_patch = edited_code
+
+                    st.success("✅ Patch displayed below. You can edit and pass it to QA.")
+                else:
+                    st.error("Failed to generate patch.")
 
 # -------------------------------
 # 📄 Tab 1: Trace + Patch (DebugIQanalyze)
