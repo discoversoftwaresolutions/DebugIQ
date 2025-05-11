@@ -2,7 +2,7 @@
 
 FROM python:3.11-slim
 
-# System dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential ffmpeg git curl && \
     rm -rf /var/lib/apt/lists/*
@@ -10,14 +10,14 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy files
+# Copy code
 COPY . /app
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Streamlit defaults
+# Set default port for Streamlit
 EXPOSE 10000
 
-# Start Streamlit
+# Start the app
 CMD ["streamlit", "run", "debugiq_dashboard_v2.py", "--server.port=10000", "--server.address=0.0.0.0"]
