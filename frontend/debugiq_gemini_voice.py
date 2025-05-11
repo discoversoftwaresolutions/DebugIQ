@@ -1,181 +1,106 @@
 from pathlib import Path
 
-# Define a cleaned and fully structured version of debugiq_dashboard.py
-dashboard_code = '''
+# Clean and working debugiq_gemini_voice.py file
+gemini_voice_code = '''
 import os
-import streamlit as st
 import requests
-import difflib
-from streamlit_ace import st_ace
-from streamlit_autorefresh import st_autorefresh
-from debugiq_gemini_voice import process_voice_file, process_text_command
-import pandas as pd
-import plotly.express as px
+from openai import OpenAI
+from dotenv import load_dotenv
 
-# --- Branding + Config ---
-PROJECT_NAME = "DebugIQ"
-BACKEND_URL = "https://autonomous-debug.onrender.com"
-REPO_LINKS = {
-    "GitHub (Frontend)": "https://github.com/discoversoftwaresolutions/DebugIQ-frontend",
-    "GitHub (Backend)": "https://github.com/discoversoftwaresolutions/DebugIQ-backend"
-}
+# Load environment variables
+load_dotenv()
 
-# --- Sidebar Branding ---
-st.sidebar.title(PROJECT_NAME)
-st.sidebar.markdown("### 🔗 Repositories")
-for name, url in REPO_LINKS.items():
-    st.sidebar.markdown(f"[{name}]({url})")
-st.sidebar.markdown("---")
-st.sidebar.markdown("🧠 Powered by DebugIQanalyze (GPT-4o) + DebugIQ Voice (Gemini)")
-st.sidebar.markdown("Maintained by Discover Software Solutions")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# --- Main Interface ---
-st.title("🧠 DebugIQ Agentic Dashboard")
-st.markdown("A unified agent interface for autonomous debugging, documentation, QA, and workflow orchestration.")
+# -----------------------------
+# 🎙️ Gemini Voice Processing
+# -----------------------------
+def process_voice_file(audio_bytes: bytes) -> dict:
+    """
+    Process a .wav file using Gemini:
+    1. Transcribes voice to text
+    2. Sends text to Gemini for reasoning
+    """
+    try:
+        transcript = transcribe_audio_with_gemini(audio_bytes)
+        if not transcript:
+            return {"error": "Transcription failed."}
+        return query_gemini(transcript)
+    except Exception as e:
+        return {"error": str(e)}
 
-# --- Tabs ---
-tabs = st.tabs([
-    "📄 Trace + Patch",
-    "✅ QA",
-    "📘 Docs",
-    "📣 Issue Notices",
-    "🤖 Autonomous Workflow",
-    "🔍 Workflow Check",
-    "📊 Metrics"
-])
 
-# -------------------------------
-# 📄 Tab 1: Trace + Patch (DebugIQanalyze)
-# -------------------------------
-with tabs[0]:
-    st.header("📄 DebugIQanalyze: Patch from Traceback")
-    uploaded = st.file_uploader("Upload traceback or code file", type=["py", "txt"])
-    if uploaded:
-        code_text = uploaded.read().decode("utf-8")
-        st.code(code_text, language="python")
-        if st.button("🔧 Analyze and Patch with DebugIQanalyze"):
-            with st.spinner("Calling DebugIQanalyze (GPT-4o)..."):
-                res = requests.post(f"{BACKEND_URL}/suggest_patch", json={"code": code_text})
-                if res.status_code == 200:
-                    patch = res.json()
-                    st.code(patch["diff"], language="diff")
-                    st.markdown(f"💡 **Explanation:** {patch['explanation']}")
-                else:
-                    st.error("Patch generation failed.")
-    st.subheader("🧑‍💻 Live Editor")
-    st_ace(language="python", theme="twilight", height=250)
+def transcribe_audio_with_gemini(audio_bytes: bytes) -> str:
+    """
+    Uses Gemini-compatible endpoint (replace this stub with a working transcription endpoint).
+    """
+    try:
+        headers = {
+            "Authorization": f"Bearer {GEMINI_API_KEY}",
+            "Content-Type": "application/octet-stream"
+        }
 
-# -------------------------------
-# ✅ Tab 2: QA Validation
-# -------------------------------
-with tabs[1]:
-    st.header("✅ QA with DebugIQanalyze")
-    qa_input = st.text_area("Paste updated code for validation:")
-    if st.button("Run QA Validation"):
-        with st.spinner("Validating with DebugIQanalyze..."):
-            qa_response = requests.post(f"{BACKEND_URL}/run_qa", json={"code": qa_input})
-            if qa_response.status_code == 200:
-                st.json(qa_response.json())
-            else:
-                st.error("QA validation unavailable.")
+        # Replace with your own Gemini-compatible endpoint
+        response = requests.post(
+            "https://your-transcription-endpoint.com/v1/audio:transcribe",
+            headers=headers,
+            data=audio_bytes
+        )
+        transcript = response.json().get("transcript", "")
+        return transcript
 
-# -------------------------------
-# 📘 Tab 3: Documentation
-# -------------------------------
-with tabs[2]:
-    st.header("📘 Auto-Documentation with DebugIQanalyze")
-    doc_input = st.text_area("Paste code to generate documentation:")
-    if st.button("📝 Generate Patch Doc"):
-        doc_response = requests.post(f"{BACKEND_URL}/generate_doc", json={"code": doc_input})
-        if doc_response.status_code == 200:
-            st.markdown(doc_response.json().get("doc", "No documentation generated."))
-        else:
-            st.error("Doc generation failed.")
+    except Exception as e:
+        return f"[Gemini transcription error] {str(e)}"
 
-# -------------------------------
-# 📣 Tab 4: Issue Notices
-# -------------------------------
-with tabs[3]:
-    st.header("📣 Detected Issues (Autonomous Agent Summary)")
-    if st.button("🔍 Fetch Notices"):
-        issues = requests.get(f"{BACKEND_URL}/issues/inbox")
-        if issues.status_code == 200:
-            st.json(issues.json())
-        else:
-            st.warning("No issue data or backend error.")
+# -----------------------------
+# ✍️ GPT-4o Text Prompt Processing
+# -----------------------------
+def process_text_command(prompt: str) -> dict:
+    return query_openai(prompt)
 
-# -------------------------------
-# 🤖 Tab 5: Autonomous Workflow
-# -------------------------------
-with tabs[4]:
-    st.header("🤖 DebugIQ Autonomous Agent Workflow")
-    issue_id = st.text_input("Enter Issue ID", placeholder="e.g. ISSUE-101")
-    if st.button("▶️ Run DebugIQ Workflow"):
-        if not issue_id:
-            st.warning("Please enter a valid issue ID.")
-        else:
-            with st.spinner("Running DebugIQ agents..."):
-                response = requests.post(
-                    f"{BACKEND_URL}/run_autonomous_workflow",
-                    json={"issue_id": issue_id}
-                )
-                if response.status_code == 200:
-                    st.success("✅ Workflow completed")
-                    st.json(response.json())
-                else:
-                    st.error("❌ Workflow error from backend.")
+def query_openai(prompt: str) -> dict:
+    try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
+        )
+        reply = response.choices[0].message.content
+        return {"model": "gpt-4o", "response": reply}
+    except Exception as e:
+        return {"error": f"OpenAI error: {str(e)}"}
 
-# -------------------------------
-# 🔍 Tab 6: Workflow Check
-# -------------------------------
-with tabs[5]:
-    st.header("🔍 Workflow Integrity Check")
-    check = requests.get(f"{BACKEND_URL}/workflow_check")
-    if check.status_code == 200:
-        st.json(check.json())
-    else:
-        st.warning("Workflow status unavailable.")
+# -----------------------------
+# 🧠 Gemini Reasoning from Transcript
+# -----------------------------
+def query_gemini(prompt: str) -> dict:
+    try:
+        headers = {
+            "Authorization": f"Bearer {GEMINI_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.7}
+        }
 
-# -------------------------------
-# 📊 Tab 7: Metrics
-# -------------------------------
-with tabs[6]:
-    st.header("📊 Agent Metrics")
-    st_autorefresh(interval=30000, key="autorefresh_metrics")
-    metrics = requests.get(f"{BACKEND_URL}/metrics/status")
-    if metrics.status_code == 200:
-        st.json(metrics.json())
-    else:
-        st.warning("Metrics unavailable.")
+        response = requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+            headers=headers,
+            params={"key": GEMINI_API_KEY},
+            json=payload
+        )
+        result = response.json()
+        reply = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        return {"model": "gemini-pro", "response": reply, "input": prompt}
+    except Exception as e:
+        return {"error": f"Gemini error: {str(e)}"}
+'''
 
-# -------------------------------
-# 🧠 GPT-4o Text Command
-# -------------------------------
-st.markdown("---")
-st.subheader("🧠 Text Command to DebugIQanalyze (GPT-4o)")
-cmd = st.text_input("Enter your agent command here...")
-if st.button("Send to GPT-4o"):
-    with st.spinner("Processing via GPT-4o..."):
-        result = process_text_command(cmd)
-        if "response" in result:
-            st.success("✅ Agent Response:")
-            st.markdown(result["response"])
-        else:
-            st.error(result.get("error", "Unknown error"))
+# Write to debugiq_gemini_voice.py in frontend
+gemini_file_path = Path("/mnt/data/debugiq_gemini_voice.py")
+gemini_file_path.write_text(gemini_voice_code.strip())
 
-# -------------------------------
-# 🎙️ Gemini Voice Command Upload
-# -------------------------------
-st.markdown("---")
-st.subheader("🎙️ Voice Command to DebugIQ Voice Agent (Gemini)")
-voice_file = st.file_uploader("Upload a .wav file", type=["wav"])
-if voice_file and st.button("Send Voice to Gemini Agent"):
-    with st.spinner("Processing via Gemini..."):
-        audio_bytes = voice_file.read()
-        result = process_voice_file(audio_bytes)
-        if "response" in result:
-            st.success("✅ Gemini Agent Response:")
-            st.markdown(result["response"])
-        else:
-            st.error(result.get("error", "No response"))
-
+gemini_file_path.name
