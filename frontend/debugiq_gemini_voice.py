@@ -97,10 +97,3 @@ def query_gemini(prompt: str) -> dict:
         return {"model": "gemini-pro", "response": reply, "input": prompt}
     except Exception as e:
         return {"error": f"Gemini error: {str(e)}"}
-'''
-
-# Write to debugiq_gemini_voice.py in frontend
-gemini_file_path = Path("/mnt/data/debugiq_gemini_voice.py")
-gemini_file_path.write_text(gemini_voice_code.strip())
-
-gemini_file_path.name
