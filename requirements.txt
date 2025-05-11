@@ -8,3 +8,4 @@ requests
 streamlit-autorefresh
 openai>=1.0
 plotly>=5.0.0
+python-dotenv
