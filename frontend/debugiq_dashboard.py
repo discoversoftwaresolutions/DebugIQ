@@ -27,6 +27,15 @@ st.sidebar.markdown("Maintained by Discover Software Solutions")
 st.title("🧠 DebugIQ Agentic Dashboard")
 st.markdown("A unified agent interface for autonomous debugging, documentation, QA, and workflow orchestration.")
 
+tabs = st.tabs([
+    "📄 Trace + Patch",
+    "✅ QA",
+    "📘 Docs",
+    "📣 Issue Notices",
+    "🤖 Autonomous Workflow",
+    "🔍 Workflow Check",
+    "📊 Metrics"
+])
 # --- Tabs ---
 with tabs[0]:
     st.header("📄 Traceback + Patch (DebugIQanalyze)")
