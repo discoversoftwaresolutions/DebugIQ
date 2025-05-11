@@ -6,43 +6,35 @@ from openai import OpenAI
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-
 # -----------------------------
 # 🎙️ Gemini Voice Processing
 # -----------------------------
 def process_voice_file(audio_bytes: bytes) -> dict:
     """
     Process a .wav file using Gemini:
-    1. Transcribes voice to text (via Gemini audio endpoint)
-    2. Sends text to Gemini model
+    1. Transcribes voice to text
+    2. Sends text to Gemini for reasoning
     """
     try:
-        # 1. Send audio to Gemini audio-transcription endpoint (custom backend / Google endpoint expected)
         transcript = transcribe_audio_with_gemini(audio_bytes)
-
         if not transcript:
             return {"error": "Transcription failed."}
-
-        # 2. Send transcript to Gemini for bidirectional reasoning
         return query_gemini(transcript)
-
     except Exception as e:
         return {"error": str(e)}
 
 
 def transcribe_audio_with_gemini(audio_bytes: bytes) -> str:
     """
-    This assumes you've set up a Google Gemini-compatible transcription endpoint.
-    Replace the placeholder if you're using your own or waiting on Gemini Audio API access.
+    Uses Gemini-compatible endpoint (placeholder or proxy).
     """
     try:
-        # Placeholder logic: assume we send to your own transcription service
         headers = {
             "Authorization": f"Bearer {GEMINI_API_KEY}",
             "Content-Type": "application/octet-stream"
         }
 
-        # Replace this with your transcription proxy endpoint or Gemini-native once released
+        # Replace with your actual transcription endpoint
         response = requests.post(
             "https://your-transcription-endpoint.com/v1/audio:transcribe",
             headers=headers,
@@ -54,19 +46,19 @@ def transcribe_audio_with_gemini(audio_bytes: bytes) -> str:
     except Exception as e:
         return f"[Gemini transcription error] {str(e)}"
 
-
 # -----------------------------
 # ✍️ GPT-4o Text Prompt Processing
 # -----------------------------
 def process_text_command(prompt: str) -> dict:
     """
-    Processes a typed text command using OpenAI GPT-4o.
+    Processes a typed text command using GPT-4o.
     """
-    try:
-        client = OpenAI()
+    return query_openai(prompt)
+
 
 def query_openai(prompt: str) -> dict:
     try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
@@ -78,7 +70,7 @@ def query_openai(prompt: str) -> dict:
         return {"error": f"OpenAI error: {str(e)}"}
 
 # -----------------------------
-# 🧠 Gemini Direct (Used for Voice Transcript Response)
+# 🧠 Gemini Reasoning from Transcript
 # -----------------------------
 def query_gemini(prompt: str) -> dict:
     try:
@@ -100,6 +92,5 @@ def query_gemini(prompt: str) -> dict:
         result = response.json()
         reply = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
         return {"model": "gemini-pro", "response": reply, "input": prompt}
-
     except Exception as e:
         return {"error": f"Gemini error: {str(e)}"}
