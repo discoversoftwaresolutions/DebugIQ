@@ -6,3 +6,5 @@ numpy
 av
 requests
 streamlit-autorefresh
+openai>=1.0
+
