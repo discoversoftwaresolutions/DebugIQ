@@ -5,5 +5,5 @@ soundfile
 numpy
 av
 requests
-difflib-html
+difflib
 streamlit-autorefresh
