@@ -271,6 +271,7 @@ with text_col:
     fallback = st.checkbox("Fallback to GPT-4o", value=True)
     if st.button("Send Text to DebugIQ Voice"):
         with st.spinner("Processing text via Gemini..."):
-            result = process_text_command(cmd, fallback_model="gpt-4o" if fallback else "gemini-pro")
+             result = process_text_command(cmd)
+)
             st.success("🧠 Command interpreted")
             st.json(result)
