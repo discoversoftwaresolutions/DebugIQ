@@ -42,52 +42,40 @@ st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 
 # === Helper Functions ===
+# --- GitHub Repo Integration Sidebar ---
+st.sidebar.markdown("### 📦 Load From GitHub Repo")
+
+# Reset trigger logic
+if "github_repo_reset_trigger" in st.session_state:
+    repo_url_input = ""
+    del st.session_state.github_repo_reset_trigger
+else:
+    repo_url_input = st.session_state.get("github_repo_url_input_widget", "")
+
+repo_url_input = st.sidebar.text_input(
+    "Public GitHub URL",
+    value=repo_url_input,
+    placeholder="https://github.com/user/repo",
+    key="github_repo_url_input_widget"
+)
+
 def clear_all_github_session_state():
-    """Resets all GitHub-related session state and clears loaded analysis files."""
-    logger.info("Clearing all GitHub session state and related analysis inputs...")
-    st.session_state.github_repo_url_input = "" # Clear the input field value in session state
+    """Resets all GitHub-related session state and clears loaded analysis."""
+    logger.info("Clearing all GitHub session state and related analysis results.")
+    st.session_state.github_repo_reset_trigger = True
     st.session_state.current_github_repo_url = None
     st.session_state.github_branches = []
     st.session_state.github_selected_branch = None
     st.session_state.github_path_stack = [""]
-    st.session_state.github_repo_owner = None
-    st.session_state.github_repo_name = None
-    
-    if "analysis_results" not in st.session_state:
-        st.session_state.analysis_results = {} # Ensure it exists
-    
-    st.session_state.analysis_results.update({
-        "trace": None,
-        "source_files_content": {}
-        # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
-    })
-
-def make_api_request(method, url, json_payload=None, files=None, operation_name="API Call"):
-    """Makes a generic API request and handles exceptions."""
-    try:
-        logger.info(f"Making {method} request to {url} for {operation_name}...")
-        if files:
-            response = requests.request(method, url, files=files, data=json_payload, timeout=30)
-        else:
-            response = requests.request(method, url, json=json_payload, timeout=30)
-        response.raise_for_status()
-        try:
-            return response.json()
-        except json.JSONDecodeError:
-            logger.warning(f"{operation_name} response not JSON. Status: {response.status_code}, Content: {response.text[:100]}")
-            return {"status_code": response.status_code, "content": response.text}
-    except requests.exceptions.RequestException as req_err:
-        error_text = str(req_err)
-        if hasattr(req_err, 'response') and req_err.response is not None:
-             error_text = req_err.response.text if req_err.response.text else str(req_err)
-        logger.error(f"RequestException for {operation_name} to {url}: {req_err}. Details: {error_text}")
-        st.error(f"Communication error for {operation_name}: {req_err}")
-        return {"error": str(req_err), "details": error_text}
-    except Exception as e:
-        logger.exception(f"Unexpected error during {operation_name} to {url}")
-        st.error(f"Unexpected error with {operation_name}: {e}")
-        return {"error": str(e)}
-
+    st.session_state.analysis_results = {
+        'trace': None,
+        'patch': None,
+        'explanation': None,
+        'doc_summary': None,
+        'patched_file_name': None,
+        'original_patched_file_content': None,
+        'source_files_content': {}
+    }
 # === Session State Initialization ===
 session_defaults = {
     "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
