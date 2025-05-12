@@ -1,4 +1,4 @@
- frontend/render.yaml
+ frontend/railway.yaml
 
 services:
   - type: web
