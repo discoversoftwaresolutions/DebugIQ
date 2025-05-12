@@ -468,20 +468,8 @@ with tab_repo_insights: # New Placeholder Tab for the Digital Chart
     st.markdown("""
     This tab is intended to display a "digital chart" or visual representation of your loaded GitHub repository's content.
     
-    To implement this, I need a bit more information:
     
-    1.  **What kind of chart are you envisioning?** * A **Treemap** or **Sunburst chart** to show file/directory sizes or counts?
-        * A **Bar/Pie chart** for language distribution or file type breakdown?
-        * Something else?
     
-    2.  **What specific data from the repository should this chart visualize?** * File sizes?
-        * Number of files per directory?
-        * Lines of code per language (requires more advanced analysis on the backend)?
-        * Distribution of file extensions?
-        
-    Once you provide these details, we can work on fetching the necessary data (likely via the GitHub API within the sidebar logic or a dedicated backend call) and then use a library like **Plotly Express** or **Altair** to create and display the interactive chart here.
-    
-    For example, if you wanted a chart of languages used in the repository, the sidebar could fetch that data when a repository is loaded, store it in `st.session_state`, and this tab would then use it to render the chart.
     """)
     
     # Example placeholder for where chart might go if data was available
