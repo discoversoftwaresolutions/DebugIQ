@@ -15,7 +15,7 @@ load_dotenv()
 
 # --- Config ---
 PROJECT_NAME = "DebugIQ"
-BACKEND_URL = "https://autonomous-debug.onrender.com"
+BACKEND_URL = "https://debugiq-backend.railway.internal
 REPO_LINKS = {
     "GitHub (Frontend)": "https://github.com/discoversoftwaresolutions/DebugIQ-frontend",
     "GitHub (Backend)": "https://github.com/discoversoftwaresolutions/DebugIQ-backend"
