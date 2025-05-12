@@ -42,7 +42,8 @@ st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 
 # === Helper Functions === })        # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
-    def clear_all_github_session_state():
+
+def clear_all_github_session_state():
     """Resets all GitHub-related session state and clears loaded analysis files."""
     logger.info("Clearing all GitHub session state and related analysis inputs...")
     
@@ -65,8 +66,7 @@ st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
         if key not in st.session_state:
             st.session_state[key] = default_value
         else:
-            st.session_state[key] = default_value
-# === Session State Initialization ===
+            st.session_state[key] = default_value# === Session State Initialization ===
 session_defaults = {
     "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
     "audio_sample_width": DEFAULT_VOICE_SAMPLE_WIDTH,
