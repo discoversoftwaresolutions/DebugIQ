@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 from streamlit_ace import st_ace
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, 
 from debugiq_gemini_voice import process_text_command, process_voice_file
 import tempfile
 import av
