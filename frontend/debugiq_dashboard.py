@@ -490,7 +490,7 @@ for message in st.session_state.chat_history:
 
 try:
     ctx = webrtc_streamer
-        key="gemini_voice_agent_stream_{BACKEND_URL}", # Changed key slightly
+     key="gemini_voice_agent_stream_{BACKEND_URL}", # Changed key slightly
         mode=WebRtcMode.SENDONLY
         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
         media_stream_constraints={"audio": True, "video": False},
