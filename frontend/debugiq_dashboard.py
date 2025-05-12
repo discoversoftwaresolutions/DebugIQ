@@ -6,7 +6,7 @@ import os
 import difflib
 import tempfile
 from streamlit_ace import st_ace
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, 
 import numpy as np
 import av
 import streamlit.components.v1 as components
