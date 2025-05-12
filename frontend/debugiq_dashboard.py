@@ -14,7 +14,7 @@ import plotly.express as px
 
 # --- Branding + Config ---
 PROJECT_NAME = "DebugIQ"
-BACKEND_URL = "https://debugiq-backend.railway.internal"
+BACKEND_URL = "https://
 REPO_LINKS = {
     "GitHub (Frontend)": "https://github.com/discoversoftwaresolutions/DebugIQ-frontend",
     "GitHub (Backend)": "https://github.com/discoversoftwaresolutions/DebugIQ-backend"
