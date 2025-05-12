@@ -6,18 +6,39 @@ import os
 import difflib
 import tempfile
 from streamlit_ace import st_ace
-# Make sure ClientSettings is imported
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings # Ensured ClientSettings is imported
 import numpy as np
 import av
-from difflib import HtmlDiff # difflib.HtmlDiff is already imported
+# HtmlDiff is used as difflib.HtmlDiff().make_file()
 import streamlit.components.v1 as components
 import wave
 import json
 import logging
 import base64 # For handling audio data if sent as base64
-def reset_github_session():
-    """
+import re # For GitHub URL parsing
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# --- Constants ---
+DEFAULT_BACKEND_URL = "https://debugiq-backend.railway.app"
+BACKEND_URL = os.getenv("BACKEND_URL", DEFAULT_BACKEND_URL)
+
+DEFAULT_VOICE_SAMPLE_RATE = 16000
+DEFAULT_VOICE_SAMPLE_WIDTH = 2  # 16-bit audio (2 bytes)
+DEFAULT_VOICE_CHANNELS = 1  # Mono
+AUDIO_PROCESSING_THRESHOLD_SECONDS = 2
+
+TRACEBACK_EXTENSION = ".txt"
+SUPPORTED_SOURCE_EXTENSIONS = (
+    ".py", ".js", ".java", ".c", ".cpp", ".cs", ".go", ".rb", ".php", 
+    ".html", ".css", ".md", ".ts", ".tsx", ".json", ".yaml", ".yml", 
+    ".sh", ".R", ".swift", ".kt", ".scala"
+)
+RECOGNIZED_FILE_EXTENSIONS = SUPPORTED_SOURCE_EXTENSIONS + (TRACEBACK_EXTENSION,)
+
+# --- Helper Function to Clear GitHub State ---
 def clear_all_github_session_state():
     """Resets all GitHub related session state AND clears loaded analysis files."""
     st.session_state.github_repo_url_input = ""
@@ -27,32 +48,14 @@ def clear_all_github_session_state():
     st.session_state.github_path_stack = [""]
     st.session_state.github_repo_owner = None
     st.session_state.github_repo_name = None
-    if "analysis_results" in st.session_state:
-        st.session_state.analysis_results["trace"] = None
-        st.session_state.analysis_results["source_files_content"] = {}
-    logger.info("Cleared all GitHub session state.")
-    }
-
-    for key, default in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = default
-        else:
-            st.session_state[key] = default
-
-    st.rerun()
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# --- Constants ---
-DEFAULT_BACKEND_URL = "https://debugiq-backend.railway.app" # Your existing default
-BACKEND_URL = os.getenv("BACKEND_URL", DEFAULT_BACKEND_URL)
-
-# Voice Agent Specific Constants (add these if not already defined globally)
-DEFAULT_VOICE_SAMPLE_RATE = 16000
-DEFAULT_VOICE_SAMPLE_WIDTH = 2  # 16-bit audio (2 bytes)
-DEFAULT_VOICE_CHANNELS = 1  # Mono
-AUDIO_PROCESSING_THRESHOLD_SECONDS = 2 # Increased slightly for potentially more complete phrases
+    
+    # Ensure analysis_results is initialized before trying to access sub-keys
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = {"trace": None, "source_files_content": {}} # Default structure
+    
+    st.session_state.analysis_results["trace"] = None
+    st.session_state.analysis_results["source_files_content"] = {}
+    logger.info("Cleared all GitHub session state and related analysis inputs.")
 
 # --- Streamlit Config ---
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
@@ -65,267 +68,303 @@ session_defaults = {
     "audio_num_channels": DEFAULT_VOICE_CHANNELS,
     "audio_buffer": b"",
     "audio_frame_count": 0,
-    "chat_history": [],
-    "edited_patch": "",
-    "github_repo_url_input": "",
-    "current_github_repo_url": None,
+    "chat_history": [], # For Gemini integration (if added later)
+    "edited_patch": "",  # From patch tab editor
+    
+    # GitHub related state
+    "github_repo_url_input": "", # Current value in the input box
+    "current_github_repo_url": None, # The URL that was last successfully processed for branches
     "github_branches": [],
     "github_selected_branch": None,
     "github_path_stack": [""],
     "github_repo_owner": None,
     "github_repo_name": None,
-    "analysis_results": {"trace": None, "source_files_content": {}}
+    
+    # Analysis results (populated by GitHub, manual upload, or backend analysis)
+    "analysis_results": {
+        "trace": None,
+        "source_files_content": {}, # Dict of {filepath_in_repo: content}
+        "patch": None, # Patched code string from backend
+        "explanation": None, # Explanation from backend
+        "doc_summary": None, # Doc summary from backend
+        "patched_file_name": None, # Filename that the patch applies to
+        "original_patched_file_content": None # Original content of the file that was patched
+    },
+    
+    "qa_result": None,
+    "inbox_data": None,
+    "workflow_status_data": None,
+    "metrics_data": None,
+    "qa_code_to_validate": None # Temp state for QA tab
 }
 
-for key, default in session_defaults.items():
+for key, default_value in session_defaults.items():
     if key not in st.session_state:
-        st.session_state[key] = default
-# --- Session State Initialization (ensure these for the voice agent) ---
-if 'audio_sample_rate' not in st.session_state:
-    st.session_state.audio_sample_rate = DEFAULT_VOICE_SAMPLE_RATE
-if 'audio_sample_width' not in st.session_state:
-    st.session_state.audio_sample_width = DEFAULT_VOICE_SAMPLE_WIDTH
-if 'audio_num_channels' not in st.session_state:
-    st.session_state.audio_num_channels = DEFAULT_VOICE_CHANNELS
-if 'audio_buffer' not in st.session_state:
-    st.session_state.audio_buffer = b""
-if 'audio_frame_count' not in st.session_state:
-    st.session_state.audio_frame_count = 0
-if 'chat_history' not in st.session_state: # For Gemini conversation
-    st.session_state.chat_history = []
-if 'edited_patch' not in st.session_state: # From your patch tab
-    st.session_state.edited_patch = ""
+        st.session_state[key] = default_value
+
+# --- API Endpoints --- (Defined once)
+ANALYZE_URL = f"{BACKEND_URL}/debugiq/analyze"
+SUGGEST_PATCH_URL = f"{BACKEND_URL}/debugiq/suggest_patch" # As used in original Tab 1
+QA_URL = f"{BACKEND_URL}/qa/"
+DOC_URL = f"{BACKEND_URL}/doc/"
+VOICE_TRANSCRIBE_URL = f"{BACKEND_URL}/voice/transcribe"
+GEMINI_CHAT_URL = f"{BACKEND_URL}/gemini-chat"
+ISSUES_INBOX_URL = f"{BACKEND_URL}/issues/inbox"
+WORKFLOW_RUN_URL = f"{BACKEND_URL}/workflow/run"
+WORKFLOW_CHECK_URL = f"{BACKEND_URL}/workflow/status"
+METRICS_URL = f"{BACKEND_URL}/metrics/summary"
+
+# --- API Helper Function --- (Defined once)
+def make_api_request(method, url, json_payload=None, files=None, operation_name="API Call"):
+    try:
+        logger.info(f"Making {method} request to {url} for {operation_name}...")
+        if files:
+            response = requests.request(method, url, files=files, data=json_payload, timeout=30)
+        else:
+            response = requests.request(method, url, json=json_payload, timeout=30)
+        response.raise_for_status()
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            logger.warning(f"{operation_name} response not JSON. Status: {response.status_code}, Content: {response.text[:100]}")
+            return {"status_code": response.status_code, "content": response.text}
+    except requests.exceptions.HTTPError as http_err:
+        error_text = http_err.response.text if http_err.response else "No details from server."
+        logger.error(f"HTTP error for {operation_name} to {url}: {http_err}. Response: {error_text}")
+        st.error(f"{operation_name} failed: {http_err}. Server said: {error_text}")
+        return {"error": str(http_err), "details": error_text}
+    except requests.exceptions.RequestException as req_err:
+        logger.error(f"RequestException for {operation_name} to {url}: {req_err}")
+        st.error(f"Communication error for {operation_name}: {req_err}")
+        return {"error": str(req_err)}
+    except Exception as e:
+        logger.exception(f"Unexpected error during {operation_name} to {url}")
+        st.error(f"Unexpected error with {operation_name}: {e}")
+        return {"error": str(e)}
 
 # === GitHub Repo Integration Sidebar ===
 with st.sidebar:
     st.markdown("### 📦 Load From GitHub Repo")
-
-    # Safely get or initialize the value
-    github_url_value = st.session_state.get("github_repo_url_input", "")
-
-    # Streamlit input updates session state automatically via the key
-    repo_url_input_value = st.text_input(
+    st.text_input(
         "Public GitHub URL",
-        value=github_url_value,
         placeholder="https://github.com/user/repo",
-        key="github_repo_url_input_widget"
+        key="github_repo_url_input" # Session state automatically updated
     )
 
-    # Detect change manually and reset state
-    if repo_url_input_value != github_url_value:
-        st.session_state["github_repo_url_input"] = repo_url_input_value
-        reset_github_session()
-
-    def clear_all_github_session_state():
-    """Resets all GitHub related session state AND clears loaded analysis files."""
-    defaults = {
-        "github_repo_url_input": "",
-        "current_github_repo_url": None,
-        "github_branches": [],
-        "github_selected_branch": None,
-        "github_path_stack": [""],
-        "github_repo_owner": None,
-        "github_repo_name": None,
-    }
-    for key, val in defaults.items():
-        st.session_state[key] = val
-
-    if "analysis_results" in st.session_state:
-        st.session_state.analysis_results["trace"] = None
-        st.session_state.analysis_results["source_files_content"] = {}
-
-    logger.info("Cleared all GitHub session state.")
-
-
-# --- GitHub Repo URL Parsing & Branch Fetch ---
-github_url = st.session_state.get("github_repo_url_input", "").strip()
-if github_url:
-    match = re.match(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$", github_url)
-    if match:
-        owner, repo = match.groups()
-        if st.session_state.get("github_repo_owner") != owner or st.session_state.get("github_repo_name") != repo:
-            st.session_state.github_repo_owner = owner
-            st.session_state.github_repo_name = repo
+    if st.button("Load Repo / Reset GitHub View", key="load_reset_github_btn"):
+        # When button is clicked, process the current input value
+        # If input is empty, it effectively serves as a reset.
+        if not st.session_state.github_repo_url_input:
+            clear_all_github_session_state()
+        else:
+            # Clear previous state before loading new repo, except the input URL itself
             st.session_state.current_github_repo_url = None
+            st.session_state.github_branches = []
+            st.session_state.github_selected_branch = None
+            st.session_state.github_path_stack = [""]
+            st.session_state.github_repo_owner = None
+            st.session_state.github_repo_name = None
+            # Clear analysis files too, as new repo implies new context
+            if "analysis_results" in st.session_state: # Ensure key exists
+                 st.session_state.analysis_results["trace"] = None
+                 st.session_state.analysis_results["source_files_content"] = {}
+        st.rerun() # Rerun to process the URL below or reflect reset
 
-        if st.session_state.get("current_github_repo_url") != github_url:
-            st.session_state.current_github_repo_url = github_url
-            api_branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
-            logger.info(f"Fetching branches from {api_branches_url}")
-            try:
-                with st.spinner(f"Loading branches for {owner}/{repo}..."):
-                    response = requests.get(api_branches_url, timeout=10)
-                    response.raise_for_status()
-                    st.session_state.github_branches = [b["name"] for b in response.json()]
-                if st.session_state.github_branches:
-                    if st.session_state.github_selected_branch not in st.session_state.github_branches:
-                        st.session_state.github_selected_branch = st.session_state.github_branches[0]
-                    st.session_state.github_path_stack = [""]
-                    st.success(f"Repo '{owner}/{repo}' branches loaded.")
-                else:
-                    st.warning("No branches found.")
-            except requests.exceptions.RequestException as e:
-                st.error(f"❌ Could not fetch branches: {e}")
-                st.session_state.github_branches = []
-                st.session_state.github_selected_branch = None
-                st.session_state.current_github_repo_url = None
-            except json.JSONDecodeError as e:
-                st.error(f"❌ JSON error decoding branch list: {e}")
-                st.session_state.github_branches = []
-                st.session_state.github_selected_branch = None
+    current_url_input = st.session_state.get("github_repo_url_input", "").strip()
 
-            branches_list = st.session_state.get("github_branches", [])
-            if branches_list:
+    if current_url_input:
+        # Process URL only if it's different from the last successfully processed one, or if forced by button
+        # This logic is triggered on rerun after button click or URL input change (if st.rerun used)
+        
+        match = re.match(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$", current_url_input)
+        if match:
+            owner, repo = match.groups()
+            
+            # Update owner/repo if they changed from last processed valid URL
+            if st.session_state.github_repo_owner != owner or st.session_state.github_repo_name != repo:
+                st.session_state.github_repo_owner = owner
+                st.session_state.github_repo_name = repo
+                st.session_state.current_github_repo_url = None # Mark for branch reload
+
+            # Fetch branches if current_github_repo_url doesn't match the input field (implies new or reset)
+            if st.session_state.current_github_repo_url != current_url_input:
+                st.session_state.current_github_repo_url = current_url_input # Mark as processed for branches
+                api_branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+                logger.info(f"Fetching branches from {api_branches_url}")
                 try:
-                    current_branch_idx = branches_list.index(st.session_state.github_selected_branch) if st.session_state.github_selected_branch in branches_list else 0
-                except ValueError: # Should not happen if selected_branch is from branches_list
-                    current_branch_idx = 0
-
-                selected_branch_name = st.selectbox(
-                    "Branch",
-                    branches_list,
-                    index=current_branch_idx,
-                    key="github_branch_selectbox"
-                )
-                if selected_branch_name != st.session_state.github_selected_branch:
-                    st.session_state.github_selected_branch = selected_branch_name
-                    st.session_state.github_path_stack = [""] # Reset path on branch change
+                    with st.spinner(f"Loading branches for {owner}/{repo}..."):
+                        branches_res = requests.get(api_branches_url, timeout=10)
+                        branches_res.raise_for_status()
+                        st.session_state.github_branches = [b["name"] for b in branches_res.json()]
+                    if st.session_state.github_branches:
+                        if st.session_state.github_selected_branch not in st.session_state.github_branches:
+                            st.session_state.github_selected_branch = st.session_state.github_branches[0]
+                        st.session_state.github_path_stack = [""] # Reset path
+                        st.success(f"Repo '{owner}/{repo}' branches loaded.")
+                    else:
+                        st.warning("No branches found for this repository.")
+                        st.session_state.github_branches = [] # Ensure empty list
+                        st.session_state.github_selected_branch = None
+                except requests.exceptions.RequestException as e:
+                    st.error(f"❌ Could not fetch branches: {e}")
+                    clear_all_github_session_state() # Full reset on this kind of error
+                    st.rerun() # Rerun to clear the UI elements dependent on this state
+                except json.JSONDecodeError as e:
+                    st.error(f"❌ Error decoding branch data: {e}")
+                    clear_all_github_session_state()
                     st.rerun()
 
-            current_gh_owner = st.session_state.get("github_repo_owner")
-            current_gh_repo = st.session_state.get("github_repo_name")
-            current_gh_branch = st.session_state.get("github_selected_branch")
+            # Display branch selector if branches are loaded
+            branches_list_display = st.session_state.get("github_branches", [])
+            if branches_list_display:
+                try:
+                    branch_idx = branches_list_display.index(st.session_state.github_selected_branch) if st.session_state.github_selected_branch in branches_list_display else 0
+                except ValueError:
+                    branch_idx = 0
+                
+                selected_branch_name_display = st.selectbox(
+                    "Branch",
+                    branches_list_display,
+                    index=branch_idx,
+                    key="github_branch_selector_widget" # Changed key
+                )
+                if selected_branch_name_display != st.session_state.github_selected_branch:
+                    st.session_state.github_selected_branch = selected_branch_name_display
+                    st.session_state.github_path_stack = [""] # Reset path
+                    st.rerun()
 
-            if current_gh_owner and current_gh_repo and current_gh_branch:
-                path_stack_list = st.session_state.github_path_stack
-                current_dir_path = "/".join([p for p in path_stack_list if p])
+            # Display file browser if owner, repo, and branch are set
+            gh_owner_val = st.session_state.get("github_repo_owner")
+            gh_repo_val = st.session_state.get("github_repo_name")
+            gh_branch_val = st.session_state.get("github_selected_branch")
 
-                @st.cache_data(ttl=120, show_spinner=f"Fetching directory content...")
-                def fetch_github_directory_content_cached(gh_owner, gh_repo, dir_path, branch_name):
-                    content_url = f"https://api.github.com/repos/{gh_owner}/{gh_repo}/contents/{dir_path}?ref={branch_name}"
-                    logger.info(f"Fetching GitHub content (cached): {content_url}")
+            if gh_owner_val and gh_repo_val and gh_branch_val:
+                path_stack_display = st.session_state.github_path_stack
+                current_dir_display = "/".join([p for p in path_stack_display if p])
+
+                @st.cache_data(ttl=120, show_spinner="Fetching directory content...")
+                def fetch_github_dir_content_cached(owner_val, repo_val, dir_path_val, branch_val):
+                    api_url = f"https://api.github.com/repos/{owner_val}/{repo_val}/contents/{dir_path_val}?ref={branch_val}"
+                    logger.info(f"Fetching GitHub directory (cached): {api_url}")
                     try:
-                        content_res = requests.get(content_url, timeout=10)
-                        content_res.raise_for_status()
-                        return content_res.json()
+                        response = requests.get(api_url, timeout=10)
+                        response.raise_for_status()
+                        return response.json()
                     except requests.exceptions.RequestException as e:
-                        st.warning(f"Cannot fetch content for '{dir_path}' ({e}).")
+                        st.warning(f"Cannot fetch content for '{dir_path_val}': {e}")
                         return None
                     except json.JSONDecodeError as e:
-                        st.warning(f"Error decoding content JSON for '{dir_path}': {e}.")
+                        st.warning(f"Error decoding content JSON for '{dir_path_val}': {e}.")
                         return None
-
-                entries = fetch_github_directory_content_cached(current_gh_owner, current_gh_repo, current_dir_path, current_gh_branch)
+                
+                entries = fetch_github_dir_content_cached(gh_owner_val, gh_repo_val, current_dir_display, gh_branch_val)
 
                 if entries is not None:
-                    dirs = sorted([e["name"] for e in entries if e["type"] == "dir"])
-                    files = sorted([e["name"] for e in entries if e["type"] == "file" and any(e["name"].endswith(ext) for ext in RECOGNIZED_FILE_EXTENSIONS)])
+                    dirs_in_path = sorted([e["name"] for e in entries if e["type"] == "dir"])
+                    files_in_path = sorted([e["name"] for e in entries if e["type"] == "file" and any(e["name"].endswith(ext) for ext in RECOGNIZED_FILE_EXTENSIONS)])
 
                     st.markdown("##### 📁 Navigate Directories")
-                    if current_dir_path:
-                        if st.button("⬆️ .. (Up)", key="github_up_dir_button", use_container_width=True):
+                    if current_dir_display:
+                        if st.button("⬆️ .. (Up)", key=f"gh_up_dir_{current_dir_display}", use_container_width=True):
                             st.session_state.github_path_stack.pop()
                             st.rerun()
-                    for d_name in dirs:
-                        if st.button(f"📁 {d_name}", key=f"github_dir_{current_dir_path}_{d_name}", use_container_width=True):
-                            st.session_state.github_path_stack.append(d_name)
+                    for d_item_name in dirs_in_path:
+                        if st.button(f"📁 {d_item_name}", key=f"gh_dir_{current_dir_display}_{d_item_name}", use_container_width=True):
+                            st.session_state.github_path_stack.append(d_item_name)
                             st.rerun()
-
+                    
                     st.markdown("##### 📄 Load Files")
-                    for f_name in files:
-                        if st.button(f"📄 {f_name}", key=f"github_file_{current_dir_path}_{f_name}", use_container_width=True):
-                            file_path_in_repo_url = f"{current_dir_path}/{f_name}".strip("/")
-                            raw_file_url = f"https://raw.githubusercontent.com/{current_gh_owner}/{current_gh_repo}/{current_gh_branch}/{file_path_in_repo_url}"
-                            logger.info(f"Fetching file content: {raw_file_url}")
+                    for f_item_name in files_in_path:
+                        if st.button(f"📄 {f_item_name}", key=f"gh_file_{current_dir_display}_{f_item_name}", use_container_width=True):
+                            file_url_path_segment = f"{current_dir_display}/{f_item_name}".strip("/")
+                            raw_file_content_url = f"https://raw.githubusercontent.com/{gh_owner_val}/{gh_repo_val}/{gh_branch_val}/{file_url_path_segment}"
+                            logger.info(f"Fetching file content: {raw_file_content_url}")
                             try:
-                                with st.spinner(f"Loading {f_name}..."):
-                                    file_content_res = requests.get(raw_file_url, timeout=10)
-                                    file_content_res.raise_for_status()
-                                file_text_content = file_content_res.text
-                                st.success(f"Loaded: {f_name}")
+                                with st.spinner(f"Loading {f_item_name}..."):
+                                    file_res = requests.get(raw_file_content_url, timeout=10)
+                                    file_res.raise_for_status()
+                                file_content_str = file_res.text
+                                st.success(f"Loaded: {f_item_name}")
 
-                                full_file_display_path = os.path.join(current_dir_path, f_name).replace("\\", "/") if current_dir_path else f_name
-
-                                if f_name.endswith(TRACEBACK_EXTENSION):
-                                    st.session_state.analysis_results['trace'] = file_text_content
-                                    st.info(f"'{full_file_display_path}' loaded as traceback.")
-                                elif any(f_name.endswith(ext) for ext in SUPPORTED_SOURCE_EXTENSIONS):
-                                    st.session_state.analysis_results['source_files_content'][full_file_display_path] = file_text_content
-                                    st.info(f"'{full_file_display_path}' loaded as source file.")
-                                # No st.rerun() here, allow multiple files to be selected or to see messages.
+                                full_path_key = os.path.join(current_dir_display, f_item_name).replace("\\","/") if current_dir_display else f_item_name
+                                
+                                if f_item_name.endswith(TRACEBACK_EXTENSION):
+                                    st.session_state.analysis_results['trace'] = file_content_str
+                                    st.info(f"'{full_path_key}' loaded as traceback.")
+                                else: # Already filtered by RECOGNIZED_FILE_EXTENSIONS for button creation
+                                    st.session_state.analysis_results['source_files_content'][full_path_key] = file_content_str
+                                    st.info(f"'{full_path_key}' loaded as source file.")
+                                st.rerun() # Rerun to update the "Loaded Analysis Inputs" expander
                             except requests.exceptions.RequestException as e:
-                                st.error(f"Failed to load file {f_name}: {e}")
-                else:
-                    if current_dir_path : st.warning("Could not list directory contents.") # Only show if not root and empty
-        elif st.session_state.github_repo_url_input: # Input is present but not a valid GitHub URL
+                                st.error(f"Failed to load file {f_item_name}: {e}")
+                elif current_dir_display: # entries is None and not in root
+                     st.warning("Could not list directory contents.")
+        elif current_url_input: # URL is present but doesn't match regex
             st.warning("Invalid GitHub repo URL format. Use: https://github.com/owner/repo")
-            # Do not clear_all_github_session_state here, let user correct the input.
+            # No full clear here, user might be correcting the URL.
 
     st.markdown("---")
-    with st.expander("📬 Loaded Analysis Inputs", expanded=True): # Expanded by default
-        if st.session_state.analysis_results.get('trace'):
-            st.text_area("Current Traceback:", value=st.session_state.analysis_results['trace'], height=100, disabled=True, key="sidebar_trace_loaded_display")
+    with st.expander("📬 Loaded Analysis Inputs", expanded=True):
+        trace = st.session_state.analysis_results.get('trace')
+        sources = st.session_state.analysis_results.get('source_files_content', {})
+        if trace:
+            st.text_area("Current Traceback:", value=trace, height=100, disabled=True, key="sidebar_trace_view")
         else:
             st.caption("No traceback loaded.")
-        if st.session_state.analysis_results.get('source_files_content'):
+        if sources:
             st.write("Current Source Files:")
-            for name_key in st.session_state.analysis_results['source_files_content'].keys():
-                st.caption(f"- {name_key}")
+            for name in sources.keys():
+                st.caption(f"- {name}")
         else:
             st.caption("No source files loaded.")
     st.markdown("---")
 
-# --- Manual File Uploader (on main page, below title or in a specific area) ---
+# --- Manual File Uploader (Main Page Area) ---
 st.markdown("### ⬆️ Or, Upload Files Manually")
-manual_uploaded_files = st.file_uploader(
+manual_uploaded_files_list = st.file_uploader(
     "📄 Upload traceback (.txt) and/or source files",
     type=[ext.lstrip('.') for ext in RECOGNIZED_FILE_EXTENSIONS],
     accept_multiple_files=True,
-    key="manual_file_uploader_main_widget"
+    key="manual_uploader_widget_main"
 )
 
-if manual_uploaded_files:
-    manual_trace_content = None
-    manual_source_files = {}
-    manual_files_summary = []
+if manual_uploaded_files_list:
+    manual_trace_content_str = None
+    manual_source_files_dict = {}
+    manual_summary_list = []
 
-    for up_file in manual_uploaded_files:
+    for uploaded_file_obj in manual_uploaded_files_list:
         try:
-            decoded_content = up_file.getvalue().decode("utf-8")
-            if up_file.name.endswith(TRACEBACK_EXTENSION):
-                manual_trace_content = decoded_content
-                manual_files_summary.append(f"Traceback: {up_file.name}")
-            elif any(up_file.name.endswith(ext) for ext in SUPPORTED_SOURCE_EXTENSIONS):
-                manual_source_files[up_file.name] = decoded_content # Use original filename as key for simplicity
-                manual_files_summary.append(f"Source: {up_file.name}")
-            else:
-                st.warning(f"Skipped '{up_file.name}': unrecognized file type for this uploader.")
+            file_content_bytes = uploaded_file_obj.getvalue()
+            file_content_decoded = file_content_bytes.decode("utf-8")
+            if uploaded_file_obj.name.endswith(TRACEBACK_EXTENSION):
+                manual_trace_content_str = file_content_decoded
+                manual_summary_list.append(f"Traceback: {uploaded_file_obj.name}")
+            elif any(uploaded_file_obj.name.endswith(ext) for ext in SUPPORTED_SOURCE_EXTENSIONS):
+                manual_source_files_dict[uploaded_file_obj.name] = file_content_decoded
+                manual_summary_list.append(f"Source: {uploaded_file_obj.name}")
         except UnicodeDecodeError:
-            st.error(f"Could not decode '{up_file.name}'. Please ensure it's UTF-8.")
+            st.error(f"Could not decode '{uploaded_file_obj.name}'. Please ensure UTF-8 encoding.")
         except Exception as e:
-            st.error(f"Error processing '{up_file.name}': {e}")
+            st.error(f"Error processing '{uploaded_file_obj.name}': {e}")
 
-    if manual_trace_content is not None:
-        if "analysis_results" not in st.session_state:
-        st.session_state.analysis_results = {"trace": None, "source_files_content": {}}
-        # When a manual trace is uploaded, clear all source files (from GitHub or previous manual)
-        st.session_state.analysis_results['source_files_content'] = {}
-        if manual_source_files: # If source files were uploaded WITH this trace
-            st.session_state.analysis_results['source_files_content'] = manual_source_files
-        
-        clear_all_github_session_state() # Clear GitHub context
-        st.success(f"Manually uploaded: {', '.join(manual_files_summary)}. GitHub selection cleared.")
+    if manual_trace_content_str is not None:
+        st.session_state.analysis_results['trace'] = manual_trace_content_str
+        # If a trace is manually uploaded, it implies a new context.
+        # Overwrite source files with only those uploaded *with* this trace.
+        st.session_state.analysis_results['source_files_content'] = manual_source_files_dict 
+        clear_all_github_session_state() # Also clear GitHub state
+        st.success(f"Manually uploaded: {', '.join(manual_summary_list)}. GitHub selection cleared.")
+        st.rerun()
+    elif manual_source_files_dict: # Only source files, no trace in this batch
+        # Add to existing source files. If you want to replace, change update to assignment.
+        st.session_state.analysis_results['source_files_content'].update(manual_source_files_dict)
+        clear_all_github_session_state()
+        st.success(f"Manually added source files: {', '.join(manual_summary_list)}. GitHub selection cleared.")
         st.rerun()
 
-    elif manual_source_files: # Only source files manually uploaded, no trace
-        # Merge with existing source files, or replace all?
-        # For now, let's merge. If a more destructive replace is needed, adjust here.
-        st.session_state.analysis_results['source_files_content'].update(manual_source_files)
-        clear_all_github_session_state() # Clear GitHub context
-        st.success(f"Manually uploaded source files: {', '.join(manual_files_summary)}. GitHub selection cleared.")
-        st.rerun()
 
-# --- Tabs Setup ---
+# --- Tabs Setup --- (Defined once)
 tabs_list = [
     "📄 Traceback + Patch",
     "✅ QA Validation",
@@ -337,228 +376,272 @@ tabs_list = [
 ]
 tabs = st.tabs(tabs_list)
 
-# --- API Endpoints ---
-ANALYZE_URL = f"{BACKEND_URL}/debugiq/analyze" # You had /debugiq/suggest_patch, adjust if needed
-QA_URL = f"{BACKEND_URL}/qa/"
-DOC_URL = f"{BACKEND_URL}/doc/"
-VOICE_TRANSCRIBE_URL = f"{BACKEND_URL}/voice/transcribe"
-# VOICE_COMMAND_URL = f"{BACKEND_URL}/voice/command" # We might replace this with Gemini
-GEMINI_CHAT_URL = f"{BACKEND_URL}/gemini-chat"  # << NEW ENDPOINT FOR GEMINI
-ISSUES_INBOX_URL = f"{BACKEND_URL}/issues/inbox"
-WORKFLOW_RUN_URL = f"{BACKEND_URL}/workflow/run"
-WORKFLOW_CHECK_URL = f"{BACKEND_URL}/workflow/status" # You had /workflow/integrity-check, adjust if needed
-METRICS_URL = f"{BACKEND_URL}/metrics/summary"
-
-
-# --- Helper function (modified slightly for flexibility) ---
-def make_api_request(method, url, json_payload=None, files=None, operation_name="API Call"):
-    try:
-        logger.info(f"Making {method} request to {url} for {operation_name}...")
-        if files:
-            response = requests.request(method, url, files=files, data=json_payload, timeout=30) # Adjusted for potential data with files
-        else:
-            response = requests.request(method, url, json=json_payload, timeout=30)
-        
-        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-        
-        # Try to parse JSON, but handle cases where response might be empty or not JSON
-        try:
-            return response.json()
-        except json.JSONDecodeError:
-            logger.warning(f"{operation_name} response was not JSON. Status: {response.status_code}, Content: {response.text[:100]}")
-            return {"status_code": response.status_code, "content": response.text} # Return raw content if not JSON
-
-    except requests.exceptions.HTTPError as http_err:
-        logger.error(f"HTTP error during {operation_name} to {url}: {http_err}. Response: {http_err.response.text if http_err.response else 'No response text'}")
-        st.error(f"{operation_name} failed: {http_err}. Server said: {http_err.response.text if http_err.response else 'No details'}")
-        return {"error": str(http_err), "details": http_err.response.text if http_err.response else "No details"}
-    except requests.exceptions.RequestException as req_err:
-        logger.error(f"RequestException during {operation_name} to {url}: {req_err}")
-        st.error(f"Error communicating with backend for {operation_name}: {req_err}")
-        return {"error": str(req_err)}
-    except Exception as e: # Catch-all for other unexpected errors
-        logger.exception(f"Unexpected error during {operation_name} to {url}")
-        st.error(f"An unexpected error occurred with {operation_name}: {e}")
-        return {"error": str(e)}
-
-# --- Traceback + Patch ---
+# --- Tab 1: Traceback + Patch ---
 with tabs[0]:
-    st.header("📄 Traceback + Patch")
-    uploaded_file = st.file_uploader("Upload traceback or .py file", type=["py", "txt"], key="patch_uploader")
-    if uploaded_file:
-        original_code = uploaded_file.read().decode("utf-8")
-        st.text_area("Original Code", value=original_code, height=200, disabled=True, key="original_code_display") # Changed to text_area for consistency
+    st.header("📄 Analyze Traceback & Generate/Edit Patch")
 
-        if st.button("🧠 Suggest Patch", key="suggest_patch_btn"):
-            payload = {"code": original_code} # Assuming this is what your backend expects
-            # The ANALYZE_URL was f"{BACKEND_URL}/debugiq/analyze", your button used /debugiq/suggest_patch
-            # Using a specific URL for patch suggestion:
-            suggest_patch_url = f"{BACKEND_URL}/debugiq/suggest_patch"
-            patch_data = make_api_request("POST", suggest_patch_url, json_payload=payload, operation_name="Patch Suggestion")
+    # Display currently loaded data for context
+    loaded_trace = st.session_state.analysis_results.get('trace')
+    loaded_sources = st.session_state.analysis_results.get('source_files_content', {})
+    if loaded_trace:
+        st.info("Using loaded traceback:")
+        st.text_area("Loaded Traceback", value=loaded_trace, height=100, disabled=True, key="tab1_loaded_trace_view")
+    if loaded_sources:
+        st.info(f"Using loaded source files: {', '.join(loaded_sources.keys())}")
 
-            if patch_data and not patch_data.get("error"):
-                patched_code = patch_data.get("patched_code", "")
-                # patch_diff_text = patch_data.get("diff", "") # If backend provides text diff
+    # Button from your original code for this tab
+    # This assumes 'original_code' for the payload comes from the uploaded file logic
+    # Now it should use session state.
+    
+    # This part of your original code was for a file uploader *within the tab*.
+    # I've moved file uploading (manual and GitHub) to be global.
+    # So, the button here should operate on st.session_state.analysis_results
+    
+    # Renaming button from your original for clarity
+    if st.button("🔬 Analyze Loaded Data & Suggest Patch", key="tab1_analyze_btn"):
+        if not loaded_trace and not loaded_sources:
+            st.warning("Please load a traceback or source files using the sidebar or manual uploader first.")
+        else:
+            payload = {
+                "trace": loaded_trace, # Use trace from session state
+                "language":"python", # TODO: Make this dynamic if necessary
+                "source_files": loaded_sources # Use source_files from session state
+                }
+            # Your original code used SUGGEST_PATCH_URL here. Let's stick to that if it's specific.
+            # Otherwise, ANALYZE_URL might be more general if it returns patch, explanation etc.
+            # For now, using SUGGEST_PATCH_URL as per your tab 1 logic.
+            patch_api_response = make_api_request("POST", SUGGEST_PATCH_URL, json_payload=payload, operation_name="Patch Suggestion")
 
-                st.markdown("### 🔍 Diff View")
-                # Generate diff if original and patched code are available
-                if original_code and patched_code:
-                    html_diff_generator = difflib.HtmlDiff(wrapcolumn=70)
-                    html_diff_output = html_diff_generator.make_file(
-                        original_code.splitlines(keepends=True),
-                        patched_code.splitlines(keepends=True),
-                        fromdesc="Original",
-                        todesc="Patched"
-                    )
-                    st.components.v1.html(html_diff_output, height=450, scrolling=True)
-                else:
-                    st.info("Could not generate diff (missing original or patched code).")
+            if patch_api_response and not patch_api_response.get("error"):
+                # Update session state with all relevant fields from response
+                st.session_state.analysis_results['patch'] = patch_api_response.get("patched_code", "")
+                st.session_state.analysis_results['explanation'] = patch_api_response.get("explanation") # Assuming backend sends this
+                st.session_state.analysis_results['doc_summary'] = patch_api_response.get("doc_summary") # Assuming backend sends this
+                st.session_state.analysis_results['patched_file_name'] = patch_api_response.get("patched_file_name") # Filename the patch applies to
 
-                st.markdown("### ✍️ Edit Patch (Live)")
-                edited_code = st_ace(value=patched_code, language="python", theme="monokai", height=300, key="patch_editor_ace")
-                st.session_state.edited_patch = edited_code
+                # For diffing, we need the original content of the specific file that was patched
+                # This might require another piece of info from backend or smart handling of source_files
+                # For now, if 'original_patched_file_content' is sent by backend, use it.
+                # Otherwise, try to find it in loaded_sources if patched_file_name is known.
+                original_content_for_diff = patch_api_response.get("original_patched_file_content")
+                if not original_content_for_diff and patch_api_response.get("patched_file_name") in loaded_sources:
+                    original_content_for_diff = loaded_sources[patch_api_response.get("patched_file_name")]
+                st.session_state.analysis_results['original_patched_file_content'] = original_content_for_diff
+                
+                st.success("Patch suggestion received.")
             else:
-                st.error(f"Patch generation failed. Response: {patch_data.get('details') if patch_data else 'No response'}")
+                st.error(f"Patch generation failed. {patch_api_response.get('details', '') if patch_api_response else 'No response'}")
+                # Clear previous patch attempt results
+                st.session_state.analysis_results['patch'] = None
+                st.session_state.analysis_results['original_patched_file_content'] = None
+                st.session_state.analysis_results['patched_file_name'] = None
 
 
-# --- QA Validation --- (Using make_api_request for consistency)
-with tabs[1]:
+    # Display Diff View and Editor (logic adapted from my previous refactoring)
+    display_original_content = st.session_state.analysis_results.get('original_patched_file_content')
+    display_patched_code = st.session_state.analysis_results.get('patch')
+
+    if display_original_content is not None and display_patched_code is not None:
+        st.markdown("### 🔍 Diff View")
+        if display_original_content != display_patched_code:
+            html_diff_display = difflib.HtmlDiff(wrapcolumn=70, tabsize=4).make_table(
+                display_original_content.splitlines(keepends=True),
+                display_patched_code.splitlines(keepends=True),
+                "Original", "Patched", context=True, numlines=3
+            )
+            components.html(html_diff_display, height=450, scrolling=True)
+        else:
+            st.info("The suggested patch makes no changes to the original content.")
+        
+        st.markdown("### ✍️ Edit Patch (Live)")
+        edited_code_val = st_ace(
+            value=display_patched_code, 
+            language="python", # TODO: Infer from patched_file_name
+            theme="monokai", 
+            height=300, 
+            key="tab1_patch_editor_ace"
+        )
+        if edited_code_val != display_patched_code: # Update if changed by user
+            st.session_state.analysis_results['patch'] = edited_code_val
+            st.session_state.edited_patch = edited_code_val # Legacy key
+            st.caption("Patch updated in session.")
+    elif display_patched_code is not None: # Only patched code available (e.g., new file, or original not provided for diff)
+        st.markdown("### ✨ Generated/Patched Code")
+        st.text_area("Code:", value=display_patched_code, height=300, disabled=True, key="tab1_patched_code_only_view")
+        st.markdown("### ✍️ Edit This Code")
+        edited_code_val_no_orig = st_ace(
+            value=display_patched_code, language="python", theme="monokai", height=300, key="tab1_patch_editor_no_orig_ace"
+        )
+        if edited_code_val_no_orig != display_patched_code:
+             st.session_state.analysis_results['patch'] = edited_code_val_no_orig
+             st.session_state.edited_patch = edited_code_val_no_orig
+             st.caption("Code updated in session.")
+             
+    # Display explanation if available
+    explanation_text = st.session_state.analysis_results.get('explanation')
+    if explanation_text:
+        st.markdown("### 💬 Explanation")
+        st.text_area("Explanation of Patch:", value=explanation_text, height=150, disabled=True, key="tab1_explanation_view")
+
+
+# --- Other Tabs (using the structure from your file, with make_api_request) ---
+
+with tabs[1]: # QA Validation
     st.header("✅ QA Validation")
-    qa_code_input = st.text_area("Paste updated code for validation:", key="qa_code_input_area", height=200)
-    # You might want to use st.session_state.edited_patch here if available
-    if st.session_state.get("edited_patch"):
-         st.info("Consider using the edited patch from the 'Traceback + Patch' tab for QA.")
-         if st.button("Use Edited Patch for QA", key="use_edited_for_qa"):
-             qa_code_input = st.session_state.edited_patch # This won't directly update the widget, need st.rerun or callback
-             st.session_state.qa_code_to_validate = st.session_state.edited_patch # Store it
-             st.rerun() # To make the text_area update with the new value
+    qa_code_for_validation = st.session_state.analysis_results.get('patch') # Use the current patch from session
 
-    # If qa_code_to_validate is set, use it, otherwise use the text_area content directly
-    code_for_qa = st.session_state.get("qa_code_to_validate", qa_code_input)
-
-
-    if st.button("Run QA Validation", key="run_qa_btn"):
-        if code_for_qa:
-            payload = {"code": code_for_qa}
-            qa_result = make_api_request("POST", QA_URL, json_payload=payload, operation_name="QA Validation")
-            if qa_result and not qa_result.get("error"):
-                st.json(qa_result)
+    if qa_code_for_validation is not None:
+        st.info("Using the current patched code (from Tab 1, including edits) for QA.")
+        st.text_area("Code for QA:", value=qa_code_for_validation, height=200, disabled=True, key="qa_code_display")
+        
+        if st.button("🛡️ Run QA Validation", key="qa_run_validation_btn"):
+            payload = {
+                "code": qa_code_for_validation,
+                "patched_file_name": st.session_state.analysis_results.get('patched_file_name'),
+                "trace": st.session_state.analysis_results.get('trace'),
+                "source_files": st.session_state.analysis_results.get('source_files_content')
+            }
+            qa_response = make_api_request("POST", QA_URL, json_payload=payload, operation_name="QA Validation")
+            if qa_response and not qa_response.get("error"):
+                st.session_state.qa_result = qa_response # Store full QA result
+                st.success("QA Validation Complete.")
+                st.json(qa_response) # Display raw JSON result
             else:
-                st.error(f"QA Validation failed. Response: {qa_result.get('details') if qa_result else 'No response'}")
-        else:
-            st.warning("Please paste some code or use the edited patch for QA.")
-    if "qa_code_to_validate" in st.session_state: # Clear after use if desired
-        del st.session_state.qa_code_to_validate
+                st.error(f"QA Validation failed. {qa_response.get('details', '') if qa_response else 'No response.'}")
+    else:
+        st.warning("No patched code available from Tab 1 to validate. Please generate/load a patch first.")
 
 
-# --- Documentation --- (Using make_api_request)
-with tabs[2]:
+with tabs[2]: # Documentation
     st.header("📘 Documentation")
-    doc_code_input = st.text_area("Paste code to generate documentation:", key="doc_code_input_area", height=200)
-    if st.button("📝 Generate Code Documentation", key="generate_doc_btn"): # Changed button label slightly
-        if doc_code_input:
-            payload = {"code": doc_code_input}
-            doc_result = make_api_request("POST", DOC_URL, json_payload=payload, operation_name="Documentation Generation")
-            if doc_result and not doc_result.get("error"):
-                st.markdown(doc_result.get("doc", "No documentation generated or key 'doc' missing."))
+    # Display doc_summary from analysis_results if available
+    doc_summary_from_analysis = st.session_state.analysis_results.get('doc_summary')
+    if doc_summary_from_analysis:
+        st.subheader("Documentation Summary from Last Analysis:")
+        st.markdown(doc_summary_from_analysis)
+        st.markdown("---")
+
+    st.subheader("Generate Documentation for Specific Code:")
+    doc_code_input_val = st.text_area("Paste code to generate documentation:", key="doc_code_input_area_tab3", height=200)
+    if st.button("📝 Generate Ad-hoc Documentation", key="doc_generate_btn_tab3"):
+        if doc_code_input_val:
+            payload = {"code": doc_code_input_val}
+            doc_response = make_api_request("POST", DOC_URL, json_payload=payload, operation_name="Documentation Generation")
+            if doc_response and not doc_response.get("error"):
+                st.markdown(doc_response.get("doc", "No documentation generated or 'doc' key missing."))
             else:
-                st.error(f"Documentation generation failed. Response: {doc_result.get('details') if doc_result else 'No response'}")
+                st.error(f"Doc generation failed. {doc_response.get('details', '') if doc_response else 'No response.'}")
         else:
-            st.warning("Please paste some code to generate documentation.")
+            st.warning("Please paste code into the text area.")
 
-# --- Issue Notices --- (Using make_api_request)
-with tabs[3]:
-    st.header("📣 Detected Issues (Autonomous Agent Summary)")
-    if st.button("🔍 Fetch Notices", key="fetch_issues_btn"):
-        issues_data = make_api_request("GET", ISSUES_INBOX_URL, operation_name="Fetch Issues")
-        if issues_data and not issues_data.get("error"):
-            st.json(issues_data) # Assuming issues_data is the JSON itself
+with tabs[3]: # Issue Notices
+    st.header("📣 Issue Notices") # Simpler title from your file
+    if st.button("🔄 Refresh Issue Notices", key="issues_fetch_btn_tab4"): # Updated key for uniqueness
+        issues_response = make_api_request("GET", ISSUES_INBOX_URL, operation_name="Fetch Issues")
+        if issues_response and not issues_response.get("error"):
+            st.session_state.inbox_data = issues_response # Cache
+            st.json(issues_response)
         else:
-            st.error(f"Issue data fetch failed. Response: {issues_data.get('details') if issues_data else 'No response'}")
+            st.error(f"Issue data fetch failed. {issues_response.get('details', '') if issues_response else 'No response.'}")
+            st.session_state.inbox_data = None
+    elif st.session_state.get('inbox_data'):
+        st.info("Displaying cached issues. Refresh for latest.")
+        st.json(st.session_state.inbox_data)
+    else:
+        st.info("Click button to fetch issue notices.")
 
-# --- Autonomous Workflow --- (Using make_api_request)
-with tabs[4]:
+
+with tabs[4]: # Autonomous Workflow
     st.header("🤖 Run DebugIQ Autonomous Workflow")
-    issue_id = st.text_input("Enter Issue ID", placeholder="e.g. ISSUE-101", key="workflow_issue_id_input")
-    if st.button("▶️ Run Workflow", key="run_workflow_btn"):
-        if issue_id:
-            payload = {"issue_id": issue_id}
-            workflow_result = make_api_request("POST", WORKFLOW_RUN_URL, json_payload=payload, operation_name="Workflow Run")
-            if workflow_result and not workflow_result.get("error"):
-                st.success(f"Workflow triggered for {issue_id}.")
-                st.json(workflow_result)
+    issue_id_val = st.text_input("Enter Issue ID", placeholder="e.g. ISSUE-101", key="workflow_issue_id_input_tab5")
+    if st.button("▶️ Run Workflow", key="workflow_run_btn_tab5"):
+        if issue_id_val:
+            payload = {"issue_id": issue_id_val}
+            workflow_response = make_api_request("POST", WORKFLOW_RUN_URL, json_payload=payload, operation_name="Workflow Run")
+            if workflow_response and not workflow_response.get("error"):
+                st.success(f"Workflow triggered for {issue_id_val}.")
+                st.json(workflow_response)
             else:
-                st.error(f"Workflow execution failed for {issue_id}. Response: {workflow_result.get('details') if workflow_result else 'No response'}")
+                st.error(f"Workflow execution failed. {workflow_response.get('details', '') if workflow_response else 'No response.'}")
         else:
             st.warning("Please enter an Issue ID.")
 
-# --- Workflow Check --- (Using make_api_request)
-with tabs[5]:
-    st.header("🔍 Workflow Status Check") # Changed header slightly for clarity
-    if st.button("🔄 Refresh Workflow Status", key="refresh_workflow_status_btn"): # Added a button to fetch
-        status_data = make_api_request("GET", WORKFLOW_CHECK_URL, operation_name="Workflow Status Check")
-        if status_data and not status_data.get("error"):
-            st.json(status_data)
+with tabs[5]: # Workflow Check
+    st.header("🔍 Workflow Status Check")
+    if st.button("🔄 Refresh Workflow Status", key="workflow_check_btn_tab6"):
+        workflow_check_response = make_api_request("GET", WORKFLOW_CHECK_URL, operation_name="Workflow Status Check")
+        if workflow_check_response and not workflow_check_response.get("error"):
+            st.session_state.workflow_status_data = workflow_check_response # Cache
+            st.json(workflow_check_response)
         else:
-            st.error(f"Workflow status check failed. Response: {status_data.get('details') if status_data else 'No response'}")
+            st.error(f"Workflow check failed. {workflow_check_response.get('details', '') if workflow_check_response else 'No response.'}")
+            st.session_state.workflow_status_data = None
+    elif st.session_state.get('workflow_status_data'):
+        st.info("Displaying cached workflow status. Refresh for latest.")
+        st.json(st.session_state.workflow_status_data)
     else:
-        st.info("Click the button to fetch the latest workflow status.")
+        st.info("Click button to fetch workflow status.")
 
-
-# --- Metrics --- (Using make_api_request)
-with tabs[6]:
+with tabs[6]: # Metrics
     st.header("📊 Metrics")
-    if st.button("📈 Fetch Metrics", key="fetch_metrics_btn"): # Added a button to fetch
-        metrics_data = make_api_request("GET", METRICS_URL, operation_name="Fetch Metrics")
-        if metrics_data and not metrics_data.get("error"):
-            st.json(metrics_data)
+    if st.button("📈 Fetch Metrics", key="metrics_fetch_btn_tab7"):
+        metrics_response = make_api_request("GET", METRICS_URL, operation_name="Fetch Metrics")
+        if metrics_response and not metrics_response.get("error"):
+            st.session_state.metrics_data = metrics_response # Cache
+            st.json(metrics_response) # Consider a more visual display
         else:
-            st.error(f"Metrics fetch failed. Response: {metrics_data.get('details') if metrics_data else 'No response'}")
+            st.error(f"Metrics fetch failed. {metrics_response.get('details', '') if metrics_response else 'No response.'}")
+            st.session_state.metrics_data = None
+    elif st.session_state.get('metrics_data'):
+        st.info("Displaying cached metrics. Refresh for latest.")
+        st.json(st.session_state.metrics_data)
     else:
-        st.info("Click the button to fetch metrics.")
+        st.info("Click button to fetch metrics.")
 
 
-# === Voice Agent Section (Bi-Directional Gemini Integration) ===
+# === Voice Agent Section (Bi-Directional Gemini Integration - as per your file's structure, not full Gemini yet) ===
 st.markdown("---")
-st.markdown("## 🎙️ DebugIQ Voice Agent (with Gemini)")
-st.caption("Speak your query, and DebugIQ's Gemini assistant will respond.")
+# The title from your file was "## 🎙️ DebugIQ Voice Agent (with Gemini)"
+# but the logic was for a simpler command agent. I'll keep the title indicating Gemini aspiration
+# but the logic below is the simpler one from your file + ClientSettings fix.
+st.markdown("## 🎙️ DebugIQ Voice Agent") # Changed title to reflect current simpler functionality
+st.caption("Speak your query to the agent.")
 
-# Display chat history
-for message in st.session_state.chat_history:
+# Display chat history (from your file, assuming it's for this simpler agent or Gemini later)
+for message in st.session_state.chat_history: # This assumes chat_history is for this agent.
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-        if "audio_base64" in message and message["role"] == "assistant":
+        if "audio_base64" in message and message["role"] == "assistant": # For Gemini later
             try:
                 audio_bytes = base64.b64decode(message["audio_base64"])
-                st.audio(audio_bytes, format="audio/mp3") # Or "audio/wav" depending on your backend TTS
+                st.audio(audio_bytes, format="audio/mp3")
             except Exception as e:
                 logger.error(f"Error playing audio for assistant message: {e}")
-                st.caption("(Could not play audio for this message)")
-
 
 try:
     ctx = webrtc_streamer(
-        key=f"gemini_voice_agent_stream_{BACKEND_URL}",  # Use f-string for interpolation
+        key=f"voice_agent_stream_{BACKEND_URL}", # Original key
         mode=WebRtcMode.SENDONLY,
-        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-        media_stream_constraints={"audio": True, "video": False}
+        client_settings=ClientSettings( # Added ClientSettings
+             rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+             media_stream_constraints={"audio": True, "video": False}
+        )
     )
 except Exception as e:
     st.error(f"Failed to initialize voice agent: {e}")
-    logger.exception("Error initializing webrtc_streamer for Gemini Voice Agent")
+    logger.exception("Error initializing webrtc_streamer for Voice Agent")
     ctx = None
 
 if ctx and ctx.audio_receiver:
-    status_indicator = st.empty() # To show status like "Listening...", "Processing..."
+    status_indicator_voice = st.empty()
     try:
-        status_indicator.info("Listening...")
-        audio_frames = ctx.audio_receiver.get_frames(timeout=0.2) # Increased timeout slightly
+        status_indicator_voice.info("Listening...")
+        audio_frames = ctx.audio_receiver.get_frames(timeout=0.2)
 
         if audio_frames:
-            status_indicator.info("Processing audio...")
-            # (Audio parameter inference logic - same as your provided code)
+            status_indicator_voice.info("Processing audio...")
             first_frame_format = audio_frames[0].format
-            if first_frame_format:
+            if first_frame_format: # Infer audio params
                 if st.session_state.audio_sample_rate == DEFAULT_VOICE_SAMPLE_RATE and first_frame_format.rate:
                     st.session_state.audio_sample_rate = first_frame_format.rate
                 if st.session_state.audio_sample_width == DEFAULT_VOICE_SAMPLE_WIDTH and first_frame_format.bytes:
@@ -566,132 +649,49 @@ if ctx and ctx.audio_receiver:
                 if st.session_state.audio_num_channels == DEFAULT_VOICE_CHANNELS and first_frame_format.channels:
                     st.session_state.audio_num_channels = first_frame_format.channels
             
-            for frame in audio_frames:
+            for frame in audio_frames: # Accumulate audio data
                 if frame.format.name == 's16':
                     audio_data = frame.to_ndarray().tobytes()
                 elif frame.format.name in ['f32', 'flt32', 'flt']:
-                    float_array = frame.to_ndarray()
-                    int16_array = (float_array * (2**15 - 1)).astype(np.int16)
+                    int16_array = (frame.to_ndarray() * (2**15 - 1)).astype(np.int16)
                     audio_data = int16_array.tobytes()
-                else:
-                    logger.warning(f"Unsupported audio frame format: {frame.format.name}. Skipping frame.")
-                    continue
+                else: continue
                 st.session_state.audio_buffer += audio_data
                 st.session_state.audio_frame_count += frame.samples
-
-            st.sidebar.caption(f"Audio Buffered: {st.session_state.audio_frame_count} samples (~{st.session_state.audio_frame_count / st.session_state.audio_sample_rate:.2f}s)")
+            
+            # Display buffered info in sidebar
+            # st.sidebar.caption(f"Audio Buffered: {st.session_state.audio_frame_count} samples...") # Already in main sidebar
 
             processing_threshold_samples = AUDIO_PROCESSING_THRESHOLD_SECONDS * st.session_state.audio_sample_rate
             if st.session_state.audio_frame_count >= processing_threshold_samples and st.session_state.audio_buffer:
-                status_indicator.info("🎙️ Transcribing and sending to Gemini...")
+                status_indicator_voice.info("🎙️ Transcribing...")
                 temp_wav_file_path = None
                 try:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_wav_file:
-                        temp_wav_file_path = tmp_wav_file.name
-
-                    with wave.open(temp_wav_file_path, 'wb') as wav_writer:
-                        wav_writer.setnchannels(st.session_state.audio_num_channels)
-                        wav_writer.setsampwidth(st.session_state.audio_sample_width)
-                        wav_writer.setframerate(st.session_state.audio_sample_rate)
-                        wav_writer.writeframes(st.session_state.audio_buffer)
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_f:
+                        temp_wav_file_path = tmp_f.name
+                    with wave.open(temp_wav_file_path, 'wb') as wf:
+                        wf.setnchannels(st.session_state.audio_num_channels)
+                        wf.setsampwidth(st.session_state.audio_sample_width)
+                        wf.setframerate(st.session_state.audio_sample_rate)
+                        wf.writeframes(st.session_state.audio_buffer)
                     
-                    logger.info(f"Temporary WAV file for Gemini created at {temp_wav_file_path}")
-
-                    with open(temp_wav_file_path, "rb") as f_audio:
-                        files_payload = {"file": (f"audio_segment.wav", f_audio, "audio/wav")}
-                        # Using make_api_request for transcription
-                        transcribe_data = make_api_request(
-                            "POST", 
-                            VOICE_TRANSCRIBE_URL, 
-                            files=files_payload, 
-                            operation_name="Voice Transcription for Gemini"
+                    with open(temp_wav_file_path, "rb") as f_aud:
+                        files_payload = {"file": ("segment.wav", f_aud, "audio/wav")}
+                        transcribe_resp = make_api_request(
+                            "POST", VOICE_TRANSCRIBE_URL, files=files_payload, 
+                            operation_name="Voice Transcription"
                         )
-
-                    transcript = transcribe_data.get("transcript") if transcribe_data and not transcribe_data.get("error") else None
+                    
+                    transcript = transcribe_resp.get("transcript") if transcribe_resp and not transcribe_resp.get("error") else None
                     
                     if transcript:
-                        logger.info(f"Transcription successful: {transcript}")
+                        # The user's version sent to /gemini-chat and updated chat_history.
+                        # This version (from their latest paste) sends to a generic command URL
+                        # and doesn't update chat_history for the "assistant" or play audio back.
+                        # For now, I'll keep it as per their file's original intent for this section.
+                        # If Gemini chat is wanted, this block needs to be replaced with the Gemini version.
+                        
                         st.session_state.chat_history.append({"role": "user", "content": transcript})
-                        # Rerun to show user message immediately
-                        st.rerun() 
+                        st.rerun() # To display user's transcribed message
 
-                        # Now send to Gemini via your backend
-                        # The backend should handle conversation history if needed
-                        gemini_payload = {
-                            "text_command": transcript,
-                            "conversation_history": st.session_state.chat_history[:-1] # Send previous history for context
-                        }
-                        status_indicator.info(f"🗣️ You (Transcribed): \"{transcript}\" - Waiting for Gemini...")
-
-                        gemini_response_data = make_api_request(
-                            "POST",
-                            GEMINI_CHAT_URL,
-                            json_payload=gemini_payload,
-                            operation_name="Gemini Chat"
-                        )
-
-                        if gemini_response_data and not gemini_response_data.get("error"):
-                            assistant_text_response = gemini_response_data.get("text_response", "Sorry, I didn't get that.")
-                            assistant_audio_base64 = gemini_response_data.get("audio_content_base64") # Expecting base64 audio from backend
-
-                            assistant_message = {"role": "assistant", "content": assistant_text_response}
-                            if assistant_audio_base64:
-                                assistant_message["audio_base64"] = assistant_audio_base64
-                            
-                            st.session_state.chat_history.append(assistant_message)
-                            status_indicator.empty() # Clear status
-                            st.rerun() # Rerun to display Gemini's response and play audio
-                        else:
-                            error_detail = gemini_response_data.get('details', 'No specific error details.') if gemini_response_data else "No response from Gemini endpoint."
-                            st.session_state.chat_history.append({"role": "assistant", "content": f"Sorry, I encountered an error: {error_detail}"})
-                            status_indicator.error(f"Error from Gemini: {error_detail}")
-                            # No st.rerun here, error shown, history updated if it happens next cycle.
-
-                    else:
-                        status_indicator.warning("Transcription returned empty or failed. Please try speaking again.")
-                        if transcribe_data and transcribe_data.get("error"):
-                             logger.error(f"Transcription error: {transcribe_data.get('details')}")
-                        else:
-                             logger.info("Transcription was empty.")
-
-                except Exception as e: # Catch errors in the try-block for processing
-                    status_indicator.error(f"An error occurred during voice processing: {e}")
-                    logger.exception("Unexpected error in Gemini voice processing block")
-                finally:
-                    if temp_wav_file_path and os.path.exists(temp_wav_file_path):
-                        try:
-                            os.remove(temp_wav_file_path)
-                        except OSError as e:
-                            logger.error(f"Error removing temporary WAV file {temp_wav_file_path}: {e}")
-                    st.session_state.audio_buffer = b""
-                    st.session_state.audio_frame_count = 0
-                    if not (ctx and ctx.audio_receiver and audio_frames): # If processing didn't complete due to no frames, clear indicator
-                        status_indicator.empty()
-
-
-        elif ctx and ctx.audio_receiver: # No new frames, but receiver is active
-            status_indicator.empty() # Clear "Listening..." if no audio comes through for a bit
-            pass
-
-
-    except av.error.TimeoutError:
-        status_indicator.empty() # Clear "Listening..." if timeout occurs
-        pass # Expected if no frames are available within the timeout
-    except Exception as e:
-        if ctx and ctx.audio_receiver and not ctx.audio_receiver.is_closed:
-            st.warning(f"An issue occurred with the audio stream: {e}. Try restarting the voice agent.")
-            logger.error(f"Error processing audio frames for Gemini: {e}", exc_info=True)
-        status_indicator.empty()
-
-elif ctx and not ctx.audio_receiver : # Streamer active, but not receiving (mic stopped by user)
-    if 'chat_history' in st.session_state and st.session_state.chat_history:
-         if st.session_state.chat_history[-1]["role"] == "user" and "Processing..." in st.session_state.chat_history[-1]["content"]:
-             # Clean up if user stops mic mid-processing indicator
-             st.session_state.chat_history.pop()
-
-    if st.session_state.audio_buffer:
-        logger.info("Audio stream stopped by user with remaining buffer. Clearing buffer.")
-        st.session_state.audio_buffer = b""
-        st.session_state.audio_frame_count = 0
-    # Optionally provide feedback that the agent is stopped
-    # st.caption("Voice agent stopped. Click 'Start' to speak.")
+                        # Original logic from user's file to
