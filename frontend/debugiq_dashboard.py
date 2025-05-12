@@ -45,21 +45,43 @@ st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 def clear_all_github_session_state():
     """Resets all GitHub-related session state and clears loaded analysis files."""
     logger.info("Clearing all GitHub session state and related analysis inputs...")
-    st.session_state.github_repo_url_input = "" # Clear the input field value in session state
+    
+    # Ensure all keys exist before modifying them
+    if "github_repo_url_input" not in st.session_state:
+        st.session_state.github_repo_url_input = ""
+    st.session_state.github_repo_url_input = ""  # Clear the input field value in session state
+    
+    if "current_github_repo_url" not in st.session_state:
+        st.session_state.current_github_repo_url = None
     st.session_state.current_github_repo_url = None
+    
+    if "github_branches" not in st.session_state:
+        st.session_state.github_branches = []
     st.session_state.github_branches = []
+    
+    if "github_selected_branch" not in st.session_state:
+        st.session_state.github_selected_branch = None
     st.session_state.github_selected_branch = None
+    
+    if "github_path_stack" not in st.session_state:
+        st.session_state.github_path_stack = [""]
     st.session_state.github_path_stack = [""]
+    
+    if "github_repo_owner" not in st.session_state:
+        st.session_state.github_repo_owner = None
     st.session_state.github_repo_owner = None
+    
+    if "github_repo_name" not in st.session_state:
+        st.session_state.github_repo_name = None
     st.session_state.github_repo_name = None
     
     if "analysis_results" not in st.session_state:
-        st.session_state.analysis_results = {} # Ensure it exists
-    
+        st.session_state.analysis_results = {}
     st.session_state.analysis_results.update({
         "trace": None,
         "source_files_content": {}
         # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
+    })        # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
     })
 
 def make_api_request(method, url, json_payload=None, files=None, operation_name="API Call"):
