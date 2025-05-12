@@ -780,4 +780,4 @@ elif ctx and not ctx.audio_receiver: # Streamer context exists but no audio rece
     status_indicator_voice.caption("Voice agent is not receiving audio. Check microphone permissions or restart.")
 
 # else: ctx is None (failed to initialize) or not ctx.audio_receiver - error/message handled at component init
-Key changes in this corrected voice agent block:
+
