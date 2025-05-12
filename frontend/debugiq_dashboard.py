@@ -266,11 +266,10 @@ for message in st.session_state.chat_history:
 try:
     ctx = webrtc_streamer(
         key=f"gemini_voice_agent_stream_{BACKEND_URL}", # Changed key slightly
-        mode=WebRtcMode.SENDONLY,
+        mode=WebRtcMode.SENDONLY
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        media_stream_constraints={"audio": True, "video": False},
         
-            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-            media_stream_constraints={"audio": True, "video": False},
-        ),
         # desired_playing_state=True # Use this if you want it to start automatically in some cases
     
 except Exception as e:
