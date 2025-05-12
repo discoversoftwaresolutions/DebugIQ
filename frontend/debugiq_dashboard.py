@@ -61,7 +61,7 @@ if not autonomous_tab_imported and show_autonomous_tab_import_error:
 
 # --- Backend URL Configuration ---
 # It's crucial to set BACKEND_URL in your production environment.
-DEFAULT_BACKEND_URL = "https://debugiq-backend.onrender.com" # Keep your default
+DEFAULT_BACKEND_URL = "https://debugiq-backend.railway.app" # Keep your default
 BACKEND_URL = os.getenv("BACKEND_URL", DEFAULT_BACKEND_URL)
 if BACKEND_URL == DEFAULT_BACKEND_URL:
     st.sidebar.caption(f"⚠️ Using default backend URL: {DEFAULT_BACKEND_URL}. Set BACKEND_URL env var for production.")
