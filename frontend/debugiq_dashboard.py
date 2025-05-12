@@ -51,6 +51,231 @@ if 'chat_history' not in st.session_state: # For Gemini conversation
 if 'edited_patch' not in st.session_state: # From your patch tab
     st.session_state.edited_patch = ""
 
+# === GitHub Repo Integration Sidebar ===
+with st.sidebar:
+    st.markdown("### 📦 Load From GitHub Repo")
+    repo_url_input_value = st.text_input(
+        "Public GitHub URL",
+        value=st.session_state.github_repo_url_input,
+        placeholder="https://github.com/user/repo",
+        key="github_repo_url_input_widget"
+    )
+    if repo_url_input_value != st.session_state.github_repo_url_input:
+        st.session_state.github_repo_url_input = repo_url_input_value
+        st.session_state.current_github_repo_url = None # Force reload of branches and reset path
+        st.session_state.github_branches = []
+        st.session_state.github_selected_branch = None
+        st.session_state.github_path_stack = [""]
+        st.session_state.github_repo_owner = None
+        st.session_state.github_repo_name = None
+        st.rerun()
+
+    def clear_all_github_session_state():
+        """Resets all GitHub related session state AND clears loaded analysis files."""
+        st.session_state.github_repo_url_input = ""
+        st.session_state.current_github_repo_url = None
+        st.session_state.github_branches = []
+        st.session_state.github_selected_branch = None
+        st.session_state.github_path_stack = [""]
+        st.session_state.github_repo_owner = None
+        st.session_state.github_repo_name = None
+        # Also clear analysis inputs when GitHub context is fully cleared
+        # st.session_state.analysis_results['trace'] = None
+        # st.session_state.analysis_results['source_files_content'] = {}
+        logger.info("Cleared all GitHub session state.")
+
+
+    if st.session_state.github_repo_url_input:
+        match = re.match(r"https://github.com/([^/]+)/([^/]+)", st.session_state.github_repo_url_input.strip())
+        if match:
+            owner, repo = match.groups()
+            # Set owner and repo in session state if they change or are not set
+            if st.session_state.github_repo_owner != owner or st.session_state.github_repo_name != repo:
+                st.session_state.github_repo_owner = owner
+                st.session_state.github_repo_name = repo
+                st.session_state.current_github_repo_url = None # Force branch reload
+
+            # Fetch branches if new repo URL is effectively set (current_github_repo_url is None or different)
+            if st.session_state.current_github_repo_url != st.session_state.github_repo_url_input:
+                st.session_state.current_github_repo_url = st.session_state.github_repo_url_input
+                api_branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+                logger.info(f"Fetching branches from {api_branches_url}")
+                try:
+                    with st.spinner(f"Loading branches for {owner}/{repo}..."):
+                        branches_res = requests.get(api_branches_url, timeout=10)
+                        branches_res.raise_for_status()
+                        st.session_state.github_branches = [b["name"] for b in branches_res.json()]
+                    if st.session_state.github_branches:
+                        # Only set selected_branch if it's not already set or valid for new branches
+                        if st.session_state.github_selected_branch not in st.session_state.github_branches:
+                            st.session_state.github_selected_branch = st.session_state.github_branches[0]
+                        st.session_state.github_path_stack = [""] # Reset path
+                        st.success(f"Repo '{owner}/{repo}' branches loaded.")
+                    else:
+                        st.warning("No branches found for this repository.")
+                        st.session_state.github_branches = []
+                        st.session_state.github_selected_branch = None
+                except requests.exceptions.RequestException as e:
+                    st.error(f"❌ Failed to fetch branches: {e}. Check URL or if the repo is private (PAT needed).")
+                    # Clear more state on such a failure
+                    st.session_state.github_branches = []
+                    st.session_state.github_selected_branch = None
+                    st.session_state.current_github_repo_url = None # Allow re-attempt
+                except json.JSONDecodeError as e:
+                    st.error(f"❌ Error decoding branches data: {e}.")
+                    st.session_state.github_branches = []
+                    st.session_state.github_selected_branch = None
+                    st.session_state.current_github_repo_url = None
+
+            branches_list = st.session_state.get("github_branches", [])
+            if branches_list:
+                try:
+                    current_branch_idx = branches_list.index(st.session_state.github_selected_branch) if st.session_state.github_selected_branch in branches_list else 0
+                except ValueError: # Should not happen if selected_branch is from branches_list
+                    current_branch_idx = 0
+
+                selected_branch_name = st.selectbox(
+                    "Branch",
+                    branches_list,
+                    index=current_branch_idx,
+                    key="github_branch_selectbox"
+                )
+                if selected_branch_name != st.session_state.github_selected_branch:
+                    st.session_state.github_selected_branch = selected_branch_name
+                    st.session_state.github_path_stack = [""] # Reset path on branch change
+                    st.rerun()
+
+            current_gh_owner = st.session_state.get("github_repo_owner")
+            current_gh_repo = st.session_state.get("github_repo_name")
+            current_gh_branch = st.session_state.get("github_selected_branch")
+
+            if current_gh_owner and current_gh_repo and current_gh_branch:
+                path_stack_list = st.session_state.github_path_stack
+                current_dir_path = "/".join([p for p in path_stack_list if p])
+
+                @st.cache_data(ttl=120, show_spinner=f"Fetching directory content...")
+                def fetch_github_directory_content_cached(gh_owner, gh_repo, dir_path, branch_name):
+                    content_url = f"https://api.github.com/repos/{gh_owner}/{gh_repo}/contents/{dir_path}?ref={branch_name}"
+                    logger.info(f"Fetching GitHub content (cached): {content_url}")
+                    try:
+                        content_res = requests.get(content_url, timeout=10)
+                        content_res.raise_for_status()
+                        return content_res.json()
+                    except requests.exceptions.RequestException as e:
+                        st.warning(f"Cannot fetch content for '{dir_path}' ({e}).")
+                        return None
+                    except json.JSONDecodeError as e:
+                        st.warning(f"Error decoding content JSON for '{dir_path}': {e}.")
+                        return None
+
+                entries = fetch_github_directory_content_cached(current_gh_owner, current_gh_repo, current_dir_path, current_gh_branch)
+
+                if entries is not None:
+                    dirs = sorted([e["name"] for e in entries if e["type"] == "dir"])
+                    files = sorted([e["name"] for e in entries if e["type"] == "file" and any(e["name"].endswith(ext) for ext in RECOGNIZED_FILE_EXTENSIONS)])
+
+                    st.markdown("##### 📁 Navigate Directories")
+                    if current_dir_path:
+                        if st.button("⬆️ .. (Up)", key="github_up_dir_button", use_container_width=True):
+                            st.session_state.github_path_stack.pop()
+                            st.rerun()
+                    for d_name in dirs:
+                        if st.button(f"📁 {d_name}", key=f"github_dir_{current_dir_path}_{d_name}", use_container_width=True):
+                            st.session_state.github_path_stack.append(d_name)
+                            st.rerun()
+
+                    st.markdown("##### 📄 Load Files")
+                    for f_name in files:
+                        if st.button(f"📄 {f_name}", key=f"github_file_{current_dir_path}_{f_name}", use_container_width=True):
+                            file_path_in_repo_url = f"{current_dir_path}/{f_name}".strip("/")
+                            raw_file_url = f"https://raw.githubusercontent.com/{current_gh_owner}/{current_gh_repo}/{current_gh_branch}/{file_path_in_repo_url}"
+                            logger.info(f"Fetching file content: {raw_file_url}")
+                            try:
+                                with st.spinner(f"Loading {f_name}..."):
+                                    file_content_res = requests.get(raw_file_url, timeout=10)
+                                    file_content_res.raise_for_status()
+                                file_text_content = file_content_res.text
+                                st.success(f"Loaded: {f_name}")
+
+                                full_file_display_path = os.path.join(current_dir_path, f_name).replace("\\", "/") if current_dir_path else f_name
+
+                                if f_name.endswith(TRACEBACK_EXTENSION):
+                                    st.session_state.analysis_results['trace'] = file_text_content
+                                    st.info(f"'{full_file_display_path}' loaded as traceback.")
+                                elif any(f_name.endswith(ext) for ext in SUPPORTED_SOURCE_EXTENSIONS):
+                                    st.session_state.analysis_results['source_files_content'][full_file_display_path] = file_text_content
+                                    st.info(f"'{full_file_display_path}' loaded as source file.")
+                                # No st.rerun() here, allow multiple files to be selected or to see messages.
+                            except requests.exceptions.RequestException as e:
+                                st.error(f"Failed to load file {f_name}: {e}")
+                else:
+                    if current_dir_path : st.warning("Could not list directory contents.") # Only show if not root and empty
+        elif st.session_state.github_repo_url_input: # Input is present but not a valid GitHub URL
+            st.warning("Invalid GitHub repo URL format. Use: https://github.com/owner/repo")
+            # Do not clear_all_github_session_state here, let user correct the input.
+
+    st.markdown("---")
+    with st.expander("📬 Loaded Analysis Inputs", expanded=True): # Expanded by default
+        if st.session_state.analysis_results.get('trace'):
+            st.text_area("Current Traceback:", value=st.session_state.analysis_results['trace'], height=100, disabled=True, key="sidebar_trace_loaded_display")
+        else:
+            st.caption("No traceback loaded.")
+        if st.session_state.analysis_results.get('source_files_content'):
+            st.write("Current Source Files:")
+            for name_key in st.session_state.analysis_results['source_files_content'].keys():
+                st.caption(f"- {name_key}")
+        else:
+            st.caption("No source files loaded.")
+    st.markdown("---")
+
+# --- Manual File Uploader (on main page, below title or in a specific area) ---
+st.markdown("### ⬆️ Or, Upload Files Manually")
+manual_uploaded_files = st.file_uploader(
+    "📄 Upload traceback (.txt) and/or source files",
+    type=[ext.lstrip('.') for ext in RECOGNIZED_FILE_EXTENSIONS],
+    accept_multiple_files=True,
+    key="manual_file_uploader_main_widget"
+)
+
+if manual_uploaded_files:
+    manual_trace_content = None
+    manual_source_files = {}
+    manual_files_summary = []
+
+    for up_file in manual_uploaded_files:
+        try:
+            decoded_content = up_file.getvalue().decode("utf-8")
+            if up_file.name.endswith(TRACEBACK_EXTENSION):
+                manual_trace_content = decoded_content
+                manual_files_summary.append(f"Traceback: {up_file.name}")
+            elif any(up_file.name.endswith(ext) for ext in SUPPORTED_SOURCE_EXTENSIONS):
+                manual_source_files[up_file.name] = decoded_content # Use original filename as key for simplicity
+                manual_files_summary.append(f"Source: {up_file.name}")
+            else:
+                st.warning(f"Skipped '{up_file.name}': unrecognized file type for this uploader.")
+        except UnicodeDecodeError:
+            st.error(f"Could not decode '{up_file.name}'. Please ensure it's UTF-8.")
+        except Exception as e:
+            st.error(f"Error processing '{up_file.name}': {e}")
+
+    if manual_trace_content is not None:
+        st.session_state.analysis_results['trace'] = manual_trace_content
+        # When a manual trace is uploaded, clear all source files (from GitHub or previous manual)
+        st.session_state.analysis_results['source_files_content'] = {}
+        if manual_source_files: # If source files were uploaded WITH this trace
+            st.session_state.analysis_results['source_files_content'] = manual_source_files
+        
+        clear_all_github_session_state() # Clear GitHub context
+        st.success(f"Manually uploaded: {', '.join(manual_files_summary)}. GitHub selection cleared.")
+        st.rerun()
+
+    elif manual_source_files: # Only source files manually uploaded, no trace
+        # Merge with existing source files, or replace all?
+        # For now, let's merge. If a more destructive replace is needed, adjust here.
+        st.session_state.analysis_results['source_files_content'].update(manual_source_files)
+        clear_all_github_session_state() # Clear GitHub context
+        st.success(f"Manually uploaded source files: {', '.join(manual_files_summary)}. GitHub selection cleared.")
+        st.rerun()
 
 # --- Tabs Setup ---
 tabs_list = [
