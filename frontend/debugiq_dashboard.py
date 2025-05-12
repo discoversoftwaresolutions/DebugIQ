@@ -41,21 +41,43 @@ RECOGNIZED_FILE_EXTENSIONS = SUPPORTED_SOURCE_EXTENSIONS + (TRACEBACK_EXTENSION,
 # --- Helper Function to Clear GitHub State ---
 def clear_all_github_session_state():
     """Resets all GitHub related session state AND clears loaded analysis files."""
-    st.session_state.github_repo_url_input = ""
-    st.session_state.current_github_repo_url = None
-    st.session_state.github_branches = []
-    st.session_state.github_selected_branch = None
-    st.session_state.github_path_stack = [""]
-    st.session_state.github_repo_owner = None
-    st.session_state.github_repo_name = None
-    
-    # Ensure analysis_results is initialized before trying to access sub-keys
-    if "analysis_results" not in st.session_state:
-        st.session_state.analysis_results = {"trace": None, "source_files_content": {}} # Default structure
-    
-    st.session_state.analysis_results["trace"] = None
-    st.session_state.analysis_results["source_files_content"] = {}
-    logger.info("Cleared all GitHub session state and related analysis inputs.")
+    # Clearing individual GitHub input/selection states
+    if 'github_repo_url_input' in st.session_state: # Added check for robustness
+        st.session_state.github_repo_url_input = ""
+    if 'current_github_repo_url' in st.session_state: # Added check
+         st.session_state.current_github_repo_url = None
+    if 'github_branches' in st.session_state: # Added check
+        st.session_state.github_branches = []
+    if 'github_selected_branch' in st.session_state: # Added check
+        st.session_state.github_selected_branch = None
+    if 'github_path_stack' in st.session_state: # Added check
+        st.session_state.github_path_stack = [""]
+    if 'github_repo_owner' in st.session_state: # Added check
+        st.session_state.github_repo_owner = None
+    if 'github_repo_name' in st.session_state: # Added check
+        st.session_state.github_repo_name = None
+
+    # Clearing analysis results related to GitHub input
+    if "analysis_results" in st.session_state:
+        # Check if analysis_results is a dictionary before accessing keys
+        if isinstance(st.session_state.analysis_results, dict):
+            if "trace" in st.session_state.analysis_results:
+                st.session_state.analysis_results["trace"] = None
+            if "source_files_content" in st.session_state.analysis_results:
+                # Ensure it's a dictionary before clearing
+                 if isinstance(st.session_state.analysis_results["source_files_content"], dict):
+                    st.session_state.analysis_results["source_files_content"] = {}
+                 else:
+                     # Handle case where it might not be a dict unexpectedly
+                     st.session_state.analysis_results["source_files_content"] = {} # Reset to expected type
+        else:
+             # Handle case where analysis_results might not be a dict unexpectedly
+             st.session_state.analysis_results = {"trace": None, "source_files_content": {}} # Reset to default structure
+    # If analysis_results is not in session_state, we don't need to do anything here
+    # as the logic to initialize it elsewhere will handle its creation when needed.
+
+    logger.info("Cleared all GitHub session state and related analysis inputs.")    
+   
 
 # --- Streamlit Config ---
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
