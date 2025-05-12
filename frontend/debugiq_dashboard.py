@@ -16,7 +16,28 @@ import wave
 import json
 import logging
 import base64 # For handling audio data if sent as base64
+def reset_github_session():
+    """
+    Reset all session state variables related to GitHub repo browsing.
+    Initializes keys if they do not exist.
+    """
+    defaults = {
+        "github_repo_url_input": "",
+        "current_github_repo_url": "",
+        "github_branches": [],
+        "github_selected_branch": None,
+        "github_path_stack": [""],
+        "github_repo_owner": None,
+        "github_repo_name": None,
+    }
 
+    for key, default in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+        else:
+            st.session_state[key] = default
+
+    st.rerun()
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -54,78 +75,80 @@ if 'edited_patch' not in st.session_state: # From your patch tab
 # === GitHub Repo Integration Sidebar ===
 with st.sidebar:
     st.markdown("### 📦 Load From GitHub Repo")
+
+    # Safely get or initialize the value
+    github_url_value = st.session_state.get("github_repo_url_input", "")
+
+    # Streamlit input updates session state automatically via the key
     repo_url_input_value = st.text_input(
         "Public GitHub URL",
-        value=st.session_state.github_repo_url_input,
+        value=github_url_value,
         placeholder="https://github.com/user/repo",
         key="github_repo_url_input_widget"
     )
-    if repo_url_input_value != st.session_state.github_repo_url_input:
-        st.session_state.github_repo_url_input = repo_url_input_value
-        st.session_state.current_github_repo_url = None # Force reload of branches and reset path
-        st.session_state.github_branches = []
-        st.session_state.github_selected_branch = None
-        st.session_state.github_path_stack = [""]
-        st.session_state.github_repo_owner = None
-        st.session_state.github_repo_name = None
-        st.rerun()
+
+    # Detect change manually and reset state
+    if repo_url_input_value != github_url_value:
+        st.session_state["github_repo_url_input"] = repo_url_input_value
+        reset_github_session()
 
     def clear_all_github_session_state():
-        """Resets all GitHub related session state AND clears loaded analysis files."""
-        st.session_state.github_repo_url_input = ""
-        st.session_state.current_github_repo_url = None
-        st.session_state.github_branches = []
-        st.session_state.github_selected_branch = None
-        st.session_state.github_path_stack = [""]
-        st.session_state.github_repo_owner = None
-        st.session_state.github_repo_name = None
-        # Also clear analysis inputs when GitHub context is fully cleared
-        # st.session_state.analysis_results['trace'] = None
-        # st.session_state.analysis_results['source_files_content'] = {}
-        logger.info("Cleared all GitHub session state.")
+    """Resets all GitHub related session state AND clears loaded analysis files."""
+    defaults = {
+        "github_repo_url_input": "",
+        "current_github_repo_url": None,
+        "github_branches": [],
+        "github_selected_branch": None,
+        "github_path_stack": [""],
+        "github_repo_owner": None,
+        "github_repo_name": None,
+    }
+    for key, val in defaults.items():
+        st.session_state[key] = val
+
+    if "analysis_results" in st.session_state:
+        st.session_state.analysis_results["trace"] = None
+        st.session_state.analysis_results["source_files_content"] = {}
+
+    logger.info("Cleared all GitHub session state.")
 
 
-    if st.session_state.github_repo_url_input:
-        match = re.match(r"https://github.com/([^/]+)/([^/]+)", st.session_state.github_repo_url_input.strip())
-        if match:
-            owner, repo = match.groups()
-            # Set owner and repo in session state if they change or are not set
-            if st.session_state.github_repo_owner != owner or st.session_state.github_repo_name != repo:
-                st.session_state.github_repo_owner = owner
-                st.session_state.github_repo_name = repo
-                st.session_state.current_github_repo_url = None # Force branch reload
+# --- GitHub Repo URL Parsing & Branch Fetch ---
+github_url = st.session_state.get("github_repo_url_input", "").strip()
+if github_url:
+    match = re.match(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$", github_url)
+    if match:
+        owner, repo = match.groups()
+        if st.session_state.get("github_repo_owner") != owner or st.session_state.get("github_repo_name") != repo:
+            st.session_state.github_repo_owner = owner
+            st.session_state.github_repo_name = repo
+            st.session_state.current_github_repo_url = None
 
-            # Fetch branches if new repo URL is effectively set (current_github_repo_url is None or different)
-            if st.session_state.current_github_repo_url != st.session_state.github_repo_url_input:
-                st.session_state.current_github_repo_url = st.session_state.github_repo_url_input
-                api_branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
-                logger.info(f"Fetching branches from {api_branches_url}")
-                try:
-                    with st.spinner(f"Loading branches for {owner}/{repo}..."):
-                        branches_res = requests.get(api_branches_url, timeout=10)
-                        branches_res.raise_for_status()
-                        st.session_state.github_branches = [b["name"] for b in branches_res.json()]
-                    if st.session_state.github_branches:
-                        # Only set selected_branch if it's not already set or valid for new branches
-                        if st.session_state.github_selected_branch not in st.session_state.github_branches:
-                            st.session_state.github_selected_branch = st.session_state.github_branches[0]
-                        st.session_state.github_path_stack = [""] # Reset path
-                        st.success(f"Repo '{owner}/{repo}' branches loaded.")
-                    else:
-                        st.warning("No branches found for this repository.")
-                        st.session_state.github_branches = []
-                        st.session_state.github_selected_branch = None
-                except requests.exceptions.RequestException as e:
-                    st.error(f"❌ Failed to fetch branches: {e}. Check URL or if the repo is private (PAT needed).")
-                    # Clear more state on such a failure
-                    st.session_state.github_branches = []
-                    st.session_state.github_selected_branch = None
-                    st.session_state.current_github_repo_url = None # Allow re-attempt
-                except json.JSONDecodeError as e:
-                    st.error(f"❌ Error decoding branches data: {e}.")
-                    st.session_state.github_branches = []
-                    st.session_state.github_selected_branch = None
-                    st.session_state.current_github_repo_url = None
+        if st.session_state.get("current_github_repo_url") != github_url:
+            st.session_state.current_github_repo_url = github_url
+            api_branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+            logger.info(f"Fetching branches from {api_branches_url}")
+            try:
+                with st.spinner(f"Loading branches for {owner}/{repo}..."):
+                    response = requests.get(api_branches_url, timeout=10)
+                    response.raise_for_status()
+                    st.session_state.github_branches = [b["name"] for b in response.json()]
+                if st.session_state.github_branches:
+                    if st.session_state.github_selected_branch not in st.session_state.github_branches:
+                        st.session_state.github_selected_branch = st.session_state.github_branches[0]
+                    st.session_state.github_path_stack = [""]
+                    st.success(f"Repo '{owner}/{repo}' branches loaded.")
+                else:
+                    st.warning("No branches found.")
+            except requests.exceptions.RequestException as e:
+                st.error(f"❌ Could not fetch branches: {e}")
+                st.session_state.github_branches = []
+                st.session_state.github_selected_branch = None
+                st.session_state.current_github_repo_url = None
+            except json.JSONDecodeError as e:
+                st.error(f"❌ JSON error decoding branch list: {e}")
+                st.session_state.github_branches = []
+                st.session_state.github_selected_branch = None
 
             branches_list = st.session_state.get("github_branches", [])
             if branches_list:
@@ -259,7 +282,8 @@ if manual_uploaded_files:
             st.error(f"Error processing '{up_file.name}': {e}")
 
     if manual_trace_content is not None:
-        st.session_state.analysis_results['trace'] = manual_trace_content
+        if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = {"trace": None, "source_files_content": {}}
         # When a manual trace is uploaded, clear all source files (from GitHub or previous manual)
         st.session_state.analysis_results['source_files_content'] = {}
         if manual_source_files: # If source files were uploaded WITH this trace
