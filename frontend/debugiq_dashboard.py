@@ -82,7 +82,7 @@ def clear_all_github_session_state():
         "source_files_content": {}
         # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
     })        # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
-    })
+    
 
 def make_api_request(method, url, json_payload=None, files=None, operation_name="API Call"):
     """Makes a generic API request and handles exceptions."""
