@@ -42,8 +42,7 @@ st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 
 # === Helper Functions === })        # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
-    
-def clear_all_github_session_state():
+    def clear_all_github_session_state():
     """Resets all GitHub-related session state and clears loaded analysis files."""
     logger.info("Clearing all GitHub session state and related analysis inputs...")
     
@@ -61,37 +60,12 @@ def clear_all_github_session_state():
             "source_files_content": {},
         }
     }
-    
+
     for key, default_value in keys_to_clear.items():
         if key not in st.session_state:
             st.session_state[key] = default_value
         else:
-            st.session_state[key] = default_valuedef make_api_request(method, url, json_payload=None, files=None, operation_name="API Call"):
-    """Makes a generic API request and handles exceptions."""
-    try:
-        logger.info(f"Making {method} request to {url} for {operation_name}...")
-        if files:
-            response = requests.request(method, url, files=files, data=json_payload, timeout=30)
-        else:
-            response = requests.request(method, url, json=json_payload, timeout=30)
-        response.raise_for_status()
-        try:
-            return response.json()
-        except json.JSONDecodeError:
-            logger.warning(f"{operation_name} response not JSON. Status: {response.status_code}, Content: {response.text[:100]}")
-            return {"status_code": response.status_code, "content": response.text}
-    except requests.exceptions.RequestException as req_err:
-        error_text = str(req_err)
-        if hasattr(req_err, 'response') and req_err.response is not None:
-             error_text = req_err.response.text if req_err.response.text else str(req_err)
-        logger.error(f"RequestException for {operation_name} to {url}: {req_err}. Details: {error_text}")
-        st.error(f"Communication error for {operation_name}: {req_err}")
-        return {"error": str(req_err), "details": error_text}
-    except Exception as e:
-        logger.exception(f"Unexpected error during {operation_name} to {url}")
-        st.error(f"Unexpected error with {operation_name}: {e}")
-        return {"error": str(e)}
-
+            st.session_state[key] = default_value
 # === Session State Initialization ===
 session_defaults = {
     "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
