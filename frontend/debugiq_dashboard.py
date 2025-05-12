@@ -7,7 +7,7 @@ import difflib
 import tempfile
 from streamlit_ace import st_ace
 # Make sure ClientSettings is imported
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 import numpy as np
 import av
 from difflib import HtmlDiff # difflib.HtmlDiff is already imported
