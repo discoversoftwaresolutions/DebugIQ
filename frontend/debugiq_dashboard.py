@@ -6,7 +6,7 @@ import os
 import difflib
 import tempfile
 from streamlit_ace import st_ace
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
 import numpy as np
 import av
 import streamlit.components.v1 as components
@@ -41,39 +41,54 @@ RECOGNIZED_FILE_EXTENSIONS = SUPPORTED_SOURCE_EXTENSIONS + (TRACEBACK_EXTENSION,
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 
-# === Helper Functions === })        # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
+# === Helper Functions ===
 def clear_all_github_session_state():
     """Resets all GitHub-related session state and clears loaded analysis files."""
     logger.info("Clearing all GitHub session state and related analysis inputs...")
+    st.session_state.github_repo_url_input = "" # Clear the input field value in session state
+    st.session_state.current_github_repo_url = None
+    st.session_state.github_branches = []
+    st.session_state.github_selected_branch = None
+    st.session_state.github_path_stack = [""]
+    st.session_state.github_repo_owner = None
+    st.session_state.github_repo_name = None
     
-    # Ensure all keys exist before modifying them
-    keys_to_clear = {
-        "internal_github_repo_url_input": "",  # Use a separate key for internal state
-        "current_github_repo_url": None,
-        "github_branches": [],
-        "github_selected_branch": None,
-        "github_path_stack": [""],
-        "github_repo_owner": None,
-        "github_repo_name": None,
-        "analysis_results": {
-            "trace": None,
-            "source_files_content": {},
-        }
-    }
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = {} # Ensure it exists
     
-    # Clear or initialize session state variables
-    for key, default_value in keys_to_clear.items():
-        if key not in st.session_state:
-            st.session_state[key] = default_value
-        else:
-            st.session_state[key] = default_value    
+    st.session_state.analysis_results.update({
+        "trace": None,
+        "source_files_content": {}
+        # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
+    })
 
-for key, default_value in keys_to_clear.items():
-    if key not in st.session_state:
-        st.session_state[key] = default_value
-    else:
-        st.session_state[key] = default_value  # Properly indented block for the else statement
-# Define session_defaults after the loop
+def make_api_request(method, url, json_payload=None, files=None, operation_name="API Call"):
+    """Makes a generic API request and handles exceptions."""
+    try:
+        logger.info(f"Making {method} request to {url} for {operation_name}...")
+        if files:
+            response = requests.request(method, url, files=files, data=json_payload, timeout=30)
+        else:
+            response = requests.request(method, url, json=json_payload, timeout=30)
+        response.raise_for_status()
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            logger.warning(f"{operation_name} response not JSON. Status: {response.status_code}, Content: {response.text[:100]}")
+            return {"status_code": response.status_code, "content": response.text}
+    except requests.exceptions.RequestException as req_err:
+        error_text = str(req_err)
+        if hasattr(req_err, 'response') and req_err.response is not None:
+             error_text = req_err.response.text if req_err.response.text else str(req_err)
+        logger.error(f"RequestException for {operation_name} to {url}: {req_err}. Details: {error_text}")
+        st.error(f"Communication error for {operation_name}: {req_err}")
+        return {"error": str(req_err), "details": error_text}
+    except Exception as e:
+        logger.exception(f"Unexpected error during {operation_name} to {url}")
+        st.error(f"Unexpected error with {operation_name}: {e}")
+        return {"error": str(e)}
+
+# === Session State Initialization ===
 session_defaults = {
     "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
     "audio_sample_width": DEFAULT_VOICE_SAMPLE_WIDTH,
@@ -90,23 +105,18 @@ session_defaults = {
     "github_repo_owner": None,
     "github_repo_name": None,
     "analysis_results": {
-        "trace": None,
-        "source_files_content": {},
-        "patch": None,
-        "explanation": None,
-        "doc_summary": None,
-        "patched_file_name": None,
-        "original_patched_file_content": None,
+        "trace": None, "source_files_content": {}, "patch": None,
+        "explanation": None, "doc_summary": None, "patched_file_name": None,
+        "original_patched_file_content": None
     },
-    "qa_result": None,
-    "inbox_data": None,
-    "workflow_status_data": None,
-    "metrics_data": None,
-    "qa_code_to_validate": None,
-}# Populate session state with defaults if not already set
+    "qa_result": None, "inbox_data": None, "workflow_status_data": None,
+    "metrics_data": None, "qa_code_to_validate": None
+}
 for key, default_value in session_defaults.items():
     if key not in st.session_state:
-        st.session_state[key] = default_value# === GitHub Repo Integration Sidebar (Full Version) ===
+        st.session_state[key] = default_value
+
+# === GitHub Repo Integration Sidebar (Full Version) ===
 with st.sidebar:
     st.markdown("### 📦 Load Code from GitHub")
     
@@ -481,8 +491,20 @@ with tab_repo_insights: # New Placeholder Tab for the Digital Chart
     st.markdown("""
     This tab is intended to display a "digital chart" or visual representation of your loaded GitHub repository's content.
     
+    To implement this, I need a bit more information:
     
+    1.  **What kind of chart are you envisioning?** * A **Treemap** or **Sunburst chart** to show file/directory sizes or counts?
+        * A **Bar/Pie chart** for language distribution or file type breakdown?
+        * Something else?
     
+    2.  **What specific data from the repository should this chart visualize?** * File sizes?
+        * Number of files per directory?
+        * Lines of code per language (requires more advanced analysis on the backend)?
+        * Distribution of file extensions?
+        
+    Once you provide these details, we can work on fetching the necessary data (likely via the GitHub API within the sidebar logic or a dedicated backend call) and then use a library like **Plotly Express** or **Altair** to create and display the interactive chart here.
+    
+    For example, if you wanted a chart of languages used in the repository, the sidebar could fetch that data when a repository is loaded, store it in `st.session_state`, and this tab would then use it to render the chart.
     """)
     
     # Example placeholder for where chart might go if data was available
