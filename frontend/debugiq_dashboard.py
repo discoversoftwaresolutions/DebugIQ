@@ -56,6 +56,28 @@ AUDIO_PROCESSING_THRESHOLD_SECONDS = 2 # Increased slightly for potentially more
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 
+# --- Initialize Session State Defaults ---
+session_defaults = {
+    "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
+    "audio_sample_width": DEFAULT_VOICE_SAMPLE_WIDTH,
+    "audio_num_channels": DEFAULT_VOICE_CHANNELS,
+    "audio_buffer": b"",
+    "audio_frame_count": 0,
+    "chat_history": [],
+    "edited_patch": "",
+    "github_repo_url_input": "",
+    "current_github_repo_url": None,
+    "github_branches": [],
+    "github_selected_branch": None,
+    "github_path_stack": [""],
+    "github_repo_owner": None,
+    "github_repo_name": None,
+    "analysis_results": {"trace": None, "source_files_content": {}}
+}
+
+for key, default in session_defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 # --- Session State Initialization (ensure these for the voice agent) ---
 if 'audio_sample_rate' not in st.session_state:
     st.session_state.audio_sample_rate = DEFAULT_VOICE_SAMPLE_RATE
