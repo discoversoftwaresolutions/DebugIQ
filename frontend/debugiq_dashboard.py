@@ -272,7 +272,7 @@ try:
             media_stream_constraints={"audio": True, "video": False},
         ),
         # desired_playing_state=True # Use this if you want it to start automatically in some cases
-    )
+    
 except Exception as e:
     st.error(f"Failed to initialize voice agent: {e}")
     logger.exception("Error initializing webrtc_streamer for Gemini Voice Agent")
