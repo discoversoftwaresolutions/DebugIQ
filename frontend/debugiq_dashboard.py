@@ -18,17 +18,19 @@ import logging
 import base64 # For handling audio data if sent as base64
 def reset_github_session():
     """
-    Reset all session state variables related to GitHub repo browsing.
-    Initializes keys if they do not exist.
-    """
-    defaults = {
-        "github_repo_url_input": "",
-        "current_github_repo_url": "",
-        "github_branches": [],
-        "github_selected_branch": None,
-        "github_path_stack": [""],
-        "github_repo_owner": None,
-        "github_repo_name": None,
+def clear_all_github_session_state():
+    """Resets all GitHub related session state AND clears loaded analysis files."""
+    st.session_state.github_repo_url_input = ""
+    st.session_state.current_github_repo_url = None
+    st.session_state.github_branches = []
+    st.session_state.github_selected_branch = None
+    st.session_state.github_path_stack = [""]
+    st.session_state.github_repo_owner = None
+    st.session_state.github_repo_name = None
+    if "analysis_results" in st.session_state:
+        st.session_state.analysis_results["trace"] = None
+        st.session_state.analysis_results["source_files_content"] = {}
+    logger.info("Cleared all GitHub session state.")
     }
 
     for key, default in defaults.items():
