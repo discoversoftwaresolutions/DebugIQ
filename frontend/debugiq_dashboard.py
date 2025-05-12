@@ -599,49 +599,55 @@ with tabs[6]: # Metrics
         st.info("Click button to fetch metrics.")
 
 
-# === Voice Agent Section (Bi-Directional Gemini Integration - as per your file's structure, not full Gemini yet) ===
+# === Voice Agent Section (Bi-Directional Gemini Integration) ===
 st.markdown("---")
-# The title from your file was "## 🎙️ DebugIQ Voice Agent (with Gemini)"
-# but the logic was for a simpler command agent. I'll keep the title indicating Gemini aspiration
-# but the logic below is the simpler one from your file + ClientSettings fix.
-st.markdown("## 🎙️ DebugIQ Voice Agent") # Changed title to reflect current simpler functionality
-st.caption("Speak your query to the agent.")
+st.markdown("## 🎙️ DebugIQ Voice Agent (with Gemini)") # Title reflecting Gemini goal
+st.caption("Speak your query, and DebugIQ's Gemini assistant will respond.")
 
-# Display chat history (from your file, assuming it's for this simpler agent or Gemini later)
-for message in st.session_state.chat_history: # This assumes chat_history is for this agent.
+# Display chat history
+# This should be at the beginning of this UI section to show existing messages on rerun
+for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-        if "audio_base64" in message and message["role"] == "assistant": # For Gemini later
+        if "audio_base64" in message and message["role"] == "assistant":
             try:
                 audio_bytes = base64.b64decode(message["audio_base64"])
-                st.audio(audio_bytes, format="audio/mp3")
+                st.audio(audio_bytes, format="audio/mp3") # Or "audio/wav" depending on your backend
             except Exception as e:
                 logger.error(f"Error playing audio for assistant message: {e}")
+                st.caption("(Could not play audio for this message)")
 
 try:
+    # Ensure ClientSettings is imported at the top of your script:
+    # from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
     ctx = webrtc_streamer(
-        key=f"voice_agent_stream_{BACKEND_URL}", # Original key
+        key=f"gemini_voice_agent_stream_{BACKEND_URL}", 
         mode=WebRtcMode.SENDONLY,
-        client_settings=ClientSettings( # Added ClientSettings
+        client_settings=ClientSettings( # Using ClientSettings
              rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
              media_stream_constraints={"audio": True, "video": False}
         )
     )
 except Exception as e:
     st.error(f"Failed to initialize voice agent: {e}")
-    logger.exception("Error initializing webrtc_streamer for Voice Agent")
+    logger.exception("Error initializing webrtc_streamer for Gemini Voice Agent")
     ctx = None
 
 if ctx and ctx.audio_receiver:
-    status_indicator_voice = st.empty()
+    status_indicator_voice = st.empty() 
     try:
-        status_indicator_voice.info("Listening...")
+        if not ctx.state.playing: # Only show "Listening" if a connection is active but no audio is being sent
+             status_indicator_voice.caption("Click 'Start' on the voice agent to speak.")
+        else:
+             status_indicator_voice.info("Listening...")
+
         audio_frames = ctx.audio_receiver.get_frames(timeout=0.2)
 
         if audio_frames:
             status_indicator_voice.info("Processing audio...")
+            # (Audio parameter inference logic - keep as is)
             first_frame_format = audio_frames[0].format
-            if first_frame_format: # Infer audio params
+            if first_frame_format:
                 if st.session_state.audio_sample_rate == DEFAULT_VOICE_SAMPLE_RATE and first_frame_format.rate:
                     st.session_state.audio_sample_rate = first_frame_format.rate
                 if st.session_state.audio_sample_width == DEFAULT_VOICE_SAMPLE_WIDTH and first_frame_format.bytes:
@@ -649,22 +655,24 @@ if ctx and ctx.audio_receiver:
                 if st.session_state.audio_num_channels == DEFAULT_VOICE_CHANNELS and first_frame_format.channels:
                     st.session_state.audio_num_channels = first_frame_format.channels
             
-            for frame in audio_frames: # Accumulate audio data
+            for frame in audio_frames:
                 if frame.format.name == 's16':
                     audio_data = frame.to_ndarray().tobytes()
                 elif frame.format.name in ['f32', 'flt32', 'flt']:
-                    int16_array = (frame.to_ndarray() * (2**15 - 1)).astype(np.int16)
+                    float_array = frame.to_ndarray()
+                    int16_array = (float_array * (2**15 - 1)).astype(np.int16)
                     audio_data = int16_array.tobytes()
-                else: continue
+                else:
+                    logger.warning(f"Unsupported audio frame format: {frame.format.name}. Skipping frame.")
+                    continue
                 st.session_state.audio_buffer += audio_data
                 st.session_state.audio_frame_count += frame.samples
             
-            # Display buffered info in sidebar
-            # st.sidebar.caption(f"Audio Buffered: {st.session_state.audio_frame_count} samples...") # Already in main sidebar
+            st.sidebar.caption(f"Audio Buffered: {st.session_state.audio_frame_count} samples (~{st.session_state.audio_frame_count / st.session_state.audio_sample_rate:.2f}s)")
 
             processing_threshold_samples = AUDIO_PROCESSING_THRESHOLD_SECONDS * st.session_state.audio_sample_rate
             if st.session_state.audio_frame_count >= processing_threshold_samples and st.session_state.audio_buffer:
-                status_indicator_voice.info("🎙️ Transcribing...")
+                status_indicator_voice.info("🎙️ Transcribing and preparing request...")
                 temp_wav_file_path = None
                 try:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_f:
@@ -675,23 +683,101 @@ if ctx and ctx.audio_receiver:
                         wf.setframerate(st.session_state.audio_sample_rate)
                         wf.writeframes(st.session_state.audio_buffer)
                     
+                    logger.info(f"Temporary WAV file for Gemini agent created at {temp_wav_file_path}")
+
                     with open(temp_wav_file_path, "rb") as f_aud:
                         files_payload = {"file": ("segment.wav", f_aud, "audio/wav")}
                         transcribe_resp = make_api_request(
                             "POST", VOICE_TRANSCRIBE_URL, files=files_payload, 
-                            operation_name="Voice Transcription"
+                            operation_name="Voice Transcription for Agent"
                         )
                     
                     transcript = transcribe_resp.get("transcript") if transcribe_resp and not transcribe_resp.get("error") else None
                     
                     if transcript:
-                        # The user's version sent to /gemini-chat and updated chat_history.
-                        # This version (from their latest paste) sends to a generic command URL
-                        # and doesn't update chat_history for the "assistant" or play audio back.
-                        # For now, I'll keep it as per their file's original intent for this section.
-                        # If Gemini chat is wanted, this block needs to be replaced with the Gemini version.
+                        logger.info(f"Agent Transcription successful: {transcript}")
                         
+                        # Add user message to history
                         st.session_state.chat_history.append({"role": "user", "content": transcript})
-                        st.rerun() # To display user's transcribed message
+                        
+                        # Prepare payload for Gemini (or your command processor)
+                        # Send the current transcript and relevant history
+                        # Example: send last few messages or handle context on backend
+                        MAX_HISTORY_LEN = 10 # Example limit
+                        history_for_payload = [msg for msg in st.session_state.chat_history if msg['role'] == 'user' or msg.get('is_gemini_response')] # Adapt if needed
+                        if len(history_for_payload) > MAX_HISTORY_LEN:
+                            history_for_payload = history_for_payload[-MAX_HISTORY_LEN:]
 
-                        # Original logic from user's file to
+                        agent_payload = {
+                            "text_command": transcript, 
+                            "conversation_history": history_for_payload[:-1] # History before current utterance
+                        }
+                        status_indicator_voice.info(f"🗣️ You: \"{transcript}\" - Sending to DebugIQ Agent...")
+
+                        # Using GEMINI_CHAT_URL for the agent interaction
+                        agent_response_data = make_api_request(
+                            "POST", 
+                            GEMINI_CHAT_URL, 
+                            json_payload=agent_payload, 
+                            operation_name="DebugIQ Voice Agent Interaction"
+                        )
+
+                        if agent_response_data and not agent_response_data.get("error"):
+                            assistant_text = agent_response_data.get("text_response", "I'm not sure how to respond to that.")
+                            assistant_audio_b64 = agent_response_data.get("audio_content_base64")
+                            
+                            assistant_msg_obj = {"role": "assistant", "content": assistant_text, "is_gemini_response": True} # Flagging as Gemini response
+                            if assistant_audio_b64:
+                                assistant_msg_obj["audio_base64"] = assistant_audio_b64
+                            st.session_state.chat_history.append(assistant_msg_obj)
+                        else:
+                            err_detail = agent_response_data.get('details', 'Failed to get a response from the agent.') if agent_response_data else "No response from agent."
+                            st.session_state.chat_history.append({"role": "assistant", "content": f"Sorry, an error occurred: {err_detail}", "is_gemini_response": True})
+                        
+                        status_indicator_voice.empty() 
+                        st.rerun() # Rerun to display the new user and assistant messages in the chat history
+
+                    else:
+                        status_indicator_voice.warning("Transcription was empty or failed. Please try speaking again.")
+                        if transcribe_resp and transcribe_resp.get("error"):
+                             logger.error(f"Agent transcription error: {transcribe_resp.get('details')}")
+                
+                except Exception as e_proc:
+                    status_indicator_voice.error(f"An error occurred during voice processing: {e_proc}")
+                    logger.exception("Error in voice agent processing block")
+                finally:
+                    if temp_wav_file_path and os.path.exists(temp_wav_file_path):
+                        try: os.remove(temp_wav_file_path)
+                        except OSError as e_os: logger.error(f"Error removing temp WAV: {e_os}")
+                    st.session_state.audio_buffer = b""
+                    st.session_state.audio_frame_count = 0
+                    # Clear status only if we are not about to show a result from the processing
+                    if not transcript: # If transcript was empty, no rerun happened yet
+                        status_indicator_voice.empty()
+
+        elif ctx.state.playing: # No new frames, but streamer is active (listening)
+            status_indicator_voice.info("Listening...")
+        else: # Not playing, probably stopped by user or not started
+            status_indicator_voice.empty()
+
+    except av.error.TimeoutError: # Normal if no audio is coming in
+        if ctx.state.playing: # Only show listening if it's supposed to be active
+             status_indicator_voice.info("Listening...")
+        else:
+             status_indicator_voice.empty()
+        pass 
+    except Exception as e_outer:
+        if ctx and ctx.state.playing and ctx.audio_receiver and not ctx.audio_receiver.is_closed:
+            st.warning(f"An issue occurred with the audio stream: {e_outer}. Try restarting the voice agent.")
+        logger.error(f"Outer error in voice agent section: {e_outer}", exc_info=True)
+        status_indicator_voice.empty()
+
+elif ctx and not ctx.audio_receiver: # Streamer context exists but no audio receiver (e.g., mic permission denied after start)
+    if st.session_state.audio_buffer: # Clear any leftover buffer
+        logger.info("Audio receiver became unavailable. Clearing buffer.")
+        st.session_state.audio_buffer = b""
+        st.session_state.audio_frame_count = 0
+    status_indicator_voice.caption("Voice agent is not receiving audio. Check microphone permissions or restart.")
+
+# else: ctx is None (failed to initialize) or not ctx.audio_receiver - error/message handled at component init
+Key changes in this corrected voice agent block:
