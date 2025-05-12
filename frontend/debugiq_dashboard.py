@@ -1,3 +1,4 @@
+# dashboard.py
 
 import streamlit as st
 import requests
@@ -5,29 +6,54 @@ import os
 import difflib
 import tempfile
 from streamlit_ace import st_ace
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
+# Make sure ClientSettings is imported
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
 import numpy as np
 import av
-from difflib import HtmlDiff
+from difflib import HtmlDiff # difflib.HtmlDiff is already imported
 import streamlit.components.v1 as components
 import wave
 import json
 import logging
+import base64 # For handling audio data if sent as base64
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # --- Constants ---
-DEFAULT_BACKEND_URL = "https://debugiq-backend.railway.app"
+DEFAULT_BACKEND_URL = "https://debugiq-backend.railway.app" # Your existing default
 BACKEND_URL = os.getenv("BACKEND_URL", DEFAULT_BACKEND_URL)
+
+# Voice Agent Specific Constants (add these if not already defined globally)
+DEFAULT_VOICE_SAMPLE_RATE = 16000
+DEFAULT_VOICE_SAMPLE_WIDTH = 2  # 16-bit audio (2 bytes)
+DEFAULT_VOICE_CHANNELS = 1  # Mono
+AUDIO_PROCESSING_THRESHOLD_SECONDS = 2 # Increased slightly for potentially more complete phrases
 
 # --- Streamlit Config ---
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 
+# --- Session State Initialization (ensure these for the voice agent) ---
+if 'audio_sample_rate' not in st.session_state:
+    st.session_state.audio_sample_rate = DEFAULT_VOICE_SAMPLE_RATE
+if 'audio_sample_width' not in st.session_state:
+    st.session_state.audio_sample_width = DEFAULT_VOICE_SAMPLE_WIDTH
+if 'audio_num_channels' not in st.session_state:
+    st.session_state.audio_num_channels = DEFAULT_VOICE_CHANNELS
+if 'audio_buffer' not in st.session_state:
+    st.session_state.audio_buffer = b""
+if 'audio_frame_count' not in st.session_state:
+    st.session_state.audio_frame_count = 0
+if 'chat_history' not in st.session_state: # For Gemini conversation
+    st.session_state.chat_history = []
+if 'edited_patch' not in st.session_state: # From your patch tab
+    st.session_state.edited_patch = ""
+
+
 # --- Tabs Setup ---
-tabs = st.tabs([
+tabs_list = [
     "📄 Traceback + Patch",
     "✅ QA Validation",
     "📘 Documentation",
@@ -35,177 +61,259 @@ tabs = st.tabs([
     "🤖 Autonomous Workflow",
     "🔍 Workflow Check",
     "📊 Metrics"
-])
+]
+tabs = st.tabs(tabs_list)
 
 # --- API Endpoints ---
-ANALYZE_URL = f"{BACKEND_URL}/debugiq/analyze"
+ANALYZE_URL = f"{BACKEND_URL}/debugiq/analyze" # You had /debugiq/suggest_patch, adjust if needed
 QA_URL = f"{BACKEND_URL}/qa/"
 DOC_URL = f"{BACKEND_URL}/doc/"
 VOICE_TRANSCRIBE_URL = f"{BACKEND_URL}/voice/transcribe"
-VOICE_COMMAND_URL = f"{BACKEND_URL}/voice/command"
+# VOICE_COMMAND_URL = f"{BACKEND_URL}/voice/command" # We might replace this with Gemini
+GEMINI_CHAT_URL = f"{BACKEND_URL}/gemini-chat"  # << NEW ENDPOINT FOR GEMINI
 ISSUES_INBOX_URL = f"{BACKEND_URL}/issues/inbox"
 WORKFLOW_RUN_URL = f"{BACKEND_URL}/workflow/run"
-WORKFLOW_CHECK_URL = f"{BACKEND_URL}/workflow/status"
+WORKFLOW_CHECK_URL = f"{BACKEND_URL}/workflow/status" # You had /workflow/integrity-check, adjust if needed
 METRICS_URL = f"{BACKEND_URL}/metrics/summary"
 
-# --- Helper function ---
-def post_json(url, payload):
+
+# --- Helper function (modified slightly for flexibility) ---
+def make_api_request(method, url, json_payload=None, files=None, operation_name="API Call"):
     try:
-        response = requests.post(url, json=payload, timeout=15)
-        return response.json()
-    except Exception as e:
+        logger.info(f"Making {method} request to {url} for {operation_name}...")
+        if files:
+            response = requests.request(method, url, files=files, data=json_payload, timeout=30) # Adjusted for potential data with files
+        else:
+            response = requests.request(method, url, json=json_payload, timeout=30)
+        
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+        
+        # Try to parse JSON, but handle cases where response might be empty or not JSON
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            logger.warning(f"{operation_name} response was not JSON. Status: {response.status_code}, Content: {response.text[:100]}")
+            return {"status_code": response.status_code, "content": response.text} # Return raw content if not JSON
+
+    except requests.exceptions.HTTPError as http_err:
+        logger.error(f"HTTP error during {operation_name} to {url}: {http_err}. Response: {http_err.response.text if http_err.response else 'No response text'}")
+        st.error(f"{operation_name} failed: {http_err}. Server said: {http_err.response.text if http_err.response else 'No details'}")
+        return {"error": str(http_err), "details": http_err.response.text if http_err.response else "No details"}
+    except requests.exceptions.RequestException as req_err:
+        logger.error(f"RequestException during {operation_name} to {url}: {req_err}")
+        st.error(f"Error communicating with backend for {operation_name}: {req_err}")
+        return {"error": str(req_err)}
+    except Exception as e: # Catch-all for other unexpected errors
+        logger.exception(f"Unexpected error during {operation_name} to {url}")
+        st.error(f"An unexpected error occurred with {operation_name}: {e}")
         return {"error": str(e)}
 
 # --- Traceback + Patch ---
 with tabs[0]:
     st.header("📄 Traceback + Patch")
-    uploaded_file = st.file_uploader("Upload traceback or .py file", type=["py", "txt"])
+    uploaded_file = st.file_uploader("Upload traceback or .py file", type=["py", "txt"], key="patch_uploader")
     if uploaded_file:
         original_code = uploaded_file.read().decode("utf-8")
-        st.code(original_code, language="python")
+        st.text_area("Original Code", value=original_code, height=200, disabled=True, key="original_code_display") # Changed to text_area for consistency
 
-        if st.button("🧠 Suggest Patch"):
-            res = requests.post(f"{BACKEND_URL}/debugiq/suggest_patch", json={"code": original_code})
-            if res.status_code == 200:
-                patch = res.json()
-                patched_code = patch.get("patched_code", "")
-                patch_diff = patch.get("diff", "")
+        if st.button("🧠 Suggest Patch", key="suggest_patch_btn"):
+            payload = {"code": original_code} # Assuming this is what your backend expects
+            # The ANALYZE_URL was f"{BACKEND_URL}/debugiq/analyze", your button used /debugiq/suggest_patch
+            # Using a specific URL for patch suggestion:
+            suggest_patch_url = f"{BACKEND_URL}/debugiq/suggest_patch"
+            patch_data = make_api_request("POST", suggest_patch_url, json_payload=payload, operation_name="Patch Suggestion")
+
+            if patch_data and not patch_data.get("error"):
+                patched_code = patch_data.get("patched_code", "")
+                # patch_diff_text = patch_data.get("diff", "") # If backend provides text diff
 
                 st.markdown("### 🔍 Diff View")
-                html_diff = difflib.HtmlDiff().make_file(
-                    original_code.splitlines(),
-                    patched_code.splitlines(),
-                    fromdesc="Original",
-                    todesc="Patched"
-                )
-                st.components.v1.html(html_diff, height=450, scrolling=True)
+                # Generate diff if original and patched code are available
+                if original_code and patched_code:
+                    html_diff_generator = difflib.HtmlDiff(wrapcolumn=70)
+                    html_diff_output = html_diff_generator.make_file(
+                        original_code.splitlines(keepends=True),
+                        patched_code.splitlines(keepends=True),
+                        fromdesc="Original",
+                        todesc="Patched"
+                    )
+                    st.components.v1.html(html_diff_output, height=450, scrolling=True)
+                else:
+                    st.info("Could not generate diff (missing original or patched code).")
 
                 st.markdown("### ✍️ Edit Patch (Live)")
-                edited_code = st_ace(value=patched_code, language="python", theme="monokai", height=300)
+                edited_code = st_ace(value=patched_code, language="python", theme="monokai", height=300, key="patch_editor_ace")
                 st.session_state.edited_patch = edited_code
             else:
-                st.error("Patch generation failed.")
+                st.error(f"Patch generation failed. Response: {patch_data.get('details') if patch_data else 'No response'}")
 
-# --- QA Validation ---
+
+# --- QA Validation --- (Using make_api_request for consistency)
 with tabs[1]:
     st.header("✅ QA Validation")
-    qa_input = st.text_area("Paste updated code for validation:")
-    if st.button("Run QA Validation"):
-        res = requests.post(QA_URL, json={"code": qa_input})
-        st.json(res.json() if res.status_code == 200 else {"error": "Validation failed"})
+    qa_code_input = st.text_area("Paste updated code for validation:", key="qa_code_input_area", height=200)
+    # You might want to use st.session_state.edited_patch here if available
+    if st.session_state.get("edited_patch"):
+         st.info("Consider using the edited patch from the 'Traceback + Patch' tab for QA.")
+         if st.button("Use Edited Patch for QA", key="use_edited_for_qa"):
+             qa_code_input = st.session_state.edited_patch # This won't directly update the widget, need st.rerun or callback
+             st.session_state.qa_code_to_validate = st.session_state.edited_patch # Store it
+             st.rerun() # To make the text_area update with the new value
 
-# --- Documentation ---
+    # If qa_code_to_validate is set, use it, otherwise use the text_area content directly
+    code_for_qa = st.session_state.get("qa_code_to_validate", qa_code_input)
+
+
+    if st.button("Run QA Validation", key="run_qa_btn"):
+        if code_for_qa:
+            payload = {"code": code_for_qa}
+            qa_result = make_api_request("POST", QA_URL, json_payload=payload, operation_name="QA Validation")
+            if qa_result and not qa_result.get("error"):
+                st.json(qa_result)
+            else:
+                st.error(f"QA Validation failed. Response: {qa_result.get('details') if qa_result else 'No response'}")
+        else:
+            st.warning("Please paste some code or use the edited patch for QA.")
+    if "qa_code_to_validate" in st.session_state: # Clear after use if desired
+        del st.session_state.qa_code_to_validate
+
+
+# --- Documentation --- (Using make_api_request)
 with tabs[2]:
     st.header("📘 Documentation")
-    doc_input = st.text_area("Paste code to generate documentation:")
-    if st.button("📝 Generate Patch Doc"):
-        doc_res = requests.post(DOC_URL, json={"code": doc_input})
-        if doc_res.status_code == 200:
-            st.markdown(doc_res.json().get("doc", "No documentation generated."))
+    doc_code_input = st.text_area("Paste code to generate documentation:", key="doc_code_input_area", height=200)
+    if st.button("📝 Generate Code Documentation", key="generate_doc_btn"): # Changed button label slightly
+        if doc_code_input:
+            payload = {"code": doc_code_input}
+            doc_result = make_api_request("POST", DOC_URL, json_payload=payload, operation_name="Documentation Generation")
+            if doc_result and not doc_result.get("error"):
+                st.markdown(doc_result.get("doc", "No documentation generated or key 'doc' missing."))
+            else:
+                st.error(f"Documentation generation failed. Response: {doc_result.get('details') if doc_result else 'No response'}")
         else:
-            st.error("Doc generation failed.")
+            st.warning("Please paste some code to generate documentation.")
 
-# --- Issue Notices ---
+# --- Issue Notices --- (Using make_api_request)
 with tabs[3]:
     st.header("📣 Detected Issues (Autonomous Agent Summary)")
-    if st.button("🔍 Fetch Notices"):
-        issues = requests.get(ISSUES_INBOX_URL)
-        st.json(issues.json() if issues.status_code == 200 else {"error": "Issue data fetch failed"})
+    if st.button("🔍 Fetch Notices", key="fetch_issues_btn"):
+        issues_data = make_api_request("GET", ISSUES_INBOX_URL, operation_name="Fetch Issues")
+        if issues_data and not issues_data.get("error"):
+            st.json(issues_data) # Assuming issues_data is the JSON itself
+        else:
+            st.error(f"Issue data fetch failed. Response: {issues_data.get('details') if issues_data else 'No response'}")
 
-# --- Autonomous Workflow ---
+# --- Autonomous Workflow --- (Using make_api_request)
 with tabs[4]:
     st.header("🤖 Run DebugIQ Autonomous Workflow")
-    issue_id = st.text_input("Enter Issue ID", placeholder="e.g. ISSUE-101")
-    if st.button("▶️ Run Workflow"):
-        res = requests.post(WORKFLOW_RUN_URL, json={"issue_id": issue_id})
-        if res.status_code == 200:
-            st.success("Workflow triggered.")
-            st.json(res.json())
+    issue_id = st.text_input("Enter Issue ID", placeholder="e.g. ISSUE-101", key="workflow_issue_id_input")
+    if st.button("▶️ Run Workflow", key="run_workflow_btn"):
+        if issue_id:
+            payload = {"issue_id": issue_id}
+            workflow_result = make_api_request("POST", WORKFLOW_RUN_URL, json_payload=payload, operation_name="Workflow Run")
+            if workflow_result and not workflow_result.get("error"):
+                st.success(f"Workflow triggered for {issue_id}.")
+                st.json(workflow_result)
+            else:
+                st.error(f"Workflow execution failed for {issue_id}. Response: {workflow_result.get('details') if workflow_result else 'No response'}")
         else:
-            st.error("Workflow execution failed.")
+            st.warning("Please enter an Issue ID.")
 
-# --- Workflow Check ---
+# --- Workflow Check --- (Using make_api_request)
 with tabs[5]:
-    st.header("🔍 Workflow Integrity Check")
-    res = requests.get(WORKFLOW_CHECK_URL)
-    st.json(res.json() if res.status_code == 200 else {"error": "Workflow check failed"})
+    st.header("🔍 Workflow Status Check") # Changed header slightly for clarity
+    if st.button("🔄 Refresh Workflow Status", key="refresh_workflow_status_btn"): # Added a button to fetch
+        status_data = make_api_request("GET", WORKFLOW_CHECK_URL, operation_name="Workflow Status Check")
+        if status_data and not status_data.get("error"):
+            st.json(status_data)
+        else:
+            st.error(f"Workflow status check failed. Response: {status_data.get('details') if status_data else 'No response'}")
+    else:
+        st.info("Click the button to fetch the latest workflow status.")
 
-# --- Metrics ---
+
+# --- Metrics --- (Using make_api_request)
 with tabs[6]:
     st.header("📊 Metrics")
-    res = requests.get(METRICS_URL)
-    st.json(res.json() if res.status_code == 200 else {"error": "Metrics fetch failed"})
-# === Voice Agent Section ===
-st.markdown("---")
-st.markdown("## 🎙️ DebugIQ Voice Agent")
-st.caption("Note: Real-time voice processing in web apps can be resource-intensive. For production with many users, consider dedicated backend audio processing services.")
+    if st.button("📈 Fetch Metrics", key="fetch_metrics_btn"): # Added a button to fetch
+        metrics_data = make_api_request("GET", METRICS_URL, operation_name="Fetch Metrics")
+        if metrics_data and not metrics_data.get("error"):
+            st.json(metrics_data)
+        else:
+            st.error(f"Metrics fetch failed. Response: {metrics_data.get('details') if metrics_data else 'No response'}")
+    else:
+        st.info("Click the button to fetch metrics.")
 
-# webrtc_streamer component handles its own UI (Start/Stop button)
-# Key ensures component re-initialization if BACKEND_URL changes, which might be desired if it affects behavior
+
+# === Voice Agent Section (Bi-Directional Gemini Integration) ===
+st.markdown("---")
+st.markdown("## 🎙️ DebugIQ Voice Agent (with Gemini)")
+st.caption("Speak your query, and DebugIQ's Gemini assistant will respond.")
+
+# Display chat history
+for message in st.session_state.chat_history:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        if "audio_base64" in message and message["role"] == "assistant":
+            try:
+                audio_bytes = base64.b64decode(message["audio_base64"])
+                st.audio(audio_bytes, format="audio/mp3") # Or "audio/wav" depending on your backend TTS
+            except Exception as e:
+                logger.error(f"Error playing audio for assistant message: {e}")
+                st.caption("(Could not play audio for this message)")
+
+
 try:
     ctx = webrtc_streamer(
-        key=f"voice_agent_stream_{BACKEND_URL}",
+        key=f"gemini_voice_agent_stream_{BACKEND_URL}", # Changed key slightly
         mode=WebRtcMode.SENDONLY,
-        client_settings=ClientSettings(
+        client_settings=ClientSettings( # Make sure ClientSettings is imported correctly
             rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
             media_stream_constraints={"audio": True, "video": False},
         ),
-        # audio_receiver_size is deprecated. Buffering is handled manually.
-        # send_target_rate_bits_per_sec can be used to suggest bitrate if needed
-        # desired_playing_state can be used to control play/pause from server if bidirectional
+        # desired_playing_state=True # Use this if you want it to start automatically in some cases
     )
-except Exception as e: # Catch potential errors during webrtc_streamer initialization
+except Exception as e:
     st.error(f"Failed to initialize voice agent: {e}")
-    logger.exception("Error initializing webrtc_streamer")
-    ctx = None # Ensure ctx is None if initialization fails
+    logger.exception("Error initializing webrtc_streamer for Gemini Voice Agent")
+    ctx = None
 
 if ctx and ctx.audio_receiver:
+    status_indicator = st.empty() # To show status like "Listening...", "Processing..."
     try:
-        audio_frames = ctx.audio_receiver.get_frames(timeout=0.1) # Non-blocking with timeout
+        status_indicator.info("Listening...")
+        audio_frames = ctx.audio_receiver.get_frames(timeout=0.2) # Increased timeout slightly
 
         if audio_frames:
-            current_sample_rate = st.session_state.audio_sample_rate
-            current_sample_width = st.session_state.audio_sample_width
-            current_num_channels = st.session_state.audio_num_channels
-
-            # Attempt to infer audio parameters from the first frame if defaults are still set
-            # This assumes consistency across frames from the same stream source
+            status_indicator.info("Processing audio...")
+            # (Audio parameter inference logic - same as your provided code)
             first_frame_format = audio_frames[0].format
             if first_frame_format:
-                if current_sample_rate == DEFAULT_VOICE_SAMPLE_RATE and first_frame_format.rate:
+                if st.session_state.audio_sample_rate == DEFAULT_VOICE_SAMPLE_RATE and first_frame_format.rate:
                     st.session_state.audio_sample_rate = first_frame_format.rate
-                    logger.info(f"Inferred sample rate: {first_frame_format.rate}")
-                if current_sample_width == DEFAULT_VOICE_SAMPLE_WIDTH and first_frame_format.bytes: # This might be sample width
-                    st.session_state.audio_sample_width = first_frame_format.bytes # Usually 2 for s16
-                    logger.info(f"Inferred sample width (bytes): {first_frame_format.bytes}")
-                if current_num_channels == DEFAULT_VOICE_CHANNELS and first_frame_format.channels:
+                if st.session_state.audio_sample_width == DEFAULT_VOICE_SAMPLE_WIDTH and first_frame_format.bytes:
+                    st.session_state.audio_sample_width = first_frame_format.bytes
+                if st.session_state.audio_num_channels == DEFAULT_VOICE_CHANNELS and first_frame_format.channels:
                     st.session_state.audio_num_channels = first_frame_format.channels
-                    logger.info(f"Inferred number of channels: {first_frame_format.channels}")
-
+            
             for frame in audio_frames:
-                # Ensure frame is in a format we can process (e.g., s16 PCM)
-                # This part is crucial and depends heavily on the audio source format.
-                # common formats: 's16' (signed 16-bit int), 'flt' (float)
                 if frame.format.name == 's16':
                     audio_data = frame.to_ndarray().tobytes()
-                elif frame.format.name in ['f32', 'flt32', 'flt']: # Common float formats
-                    # Convert float32 to int16. Max value of int16 is 2**15 - 1.
+                elif frame.format.name in ['f32', 'flt32', 'flt']:
                     float_array = frame.to_ndarray()
-                    int16_array = (float_array * (2**15 -1)).astype(np.int16)
+                    int16_array = (float_array * (2**15 - 1)).astype(np.int16)
                     audio_data = int16_array.tobytes()
                 else:
                     logger.warning(f"Unsupported audio frame format: {frame.format.name}. Skipping frame.")
                     continue
-
                 st.session_state.audio_buffer += audio_data
-                st.session_state.audio_frame_count += frame.samples # Number of samples in this frame
+                st.session_state.audio_frame_count += frame.samples
 
             st.sidebar.caption(f"Audio Buffered: {st.session_state.audio_frame_count} samples (~{st.session_state.audio_frame_count / st.session_state.audio_sample_rate:.2f}s)")
 
-            # Process buffer periodically
             processing_threshold_samples = AUDIO_PROCESSING_THRESHOLD_SECONDS * st.session_state.audio_sample_rate
             if st.session_state.audio_frame_count >= processing_threshold_samples and st.session_state.audio_buffer:
-                st.info(f"🎙️ Processing ~{st.session_state.audio_frame_count / st.session_state.audio_sample_rate:.2f}s of audio...")
+                status_indicator.info("🎙️ Transcribing and sending to Gemini...")
                 temp_wav_file_path = None
                 try:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_wav_file:
@@ -216,67 +324,104 @@ if ctx and ctx.audio_receiver:
                         wav_writer.setsampwidth(st.session_state.audio_sample_width)
                         wav_writer.setframerate(st.session_state.audio_sample_rate)
                         wav_writer.writeframes(st.session_state.audio_buffer)
-                    logger.info(f"Temporary WAV file created at {temp_wav_file_path} with {st.session_state.audio_frame_count} frames.")
+                    
+                    logger.info(f"Temporary WAV file for Gemini created at {temp_wav_file_path}")
 
                     with open(temp_wav_file_path, "rb") as f_audio:
-                        files_payload = {"file": (f"audio_segment_{abs(hash(temp_wav_file_path))}.wav", f_audio, "audio/wav")} # More descriptive filename
-                        transcribe_response = requests.post(TRANSCRIBE_URL, files=files_payload, timeout=20) # Timeout for transcribe
-                    transcribe_response.raise_for_status()
-                    transcript_data = transcribe_response.json()
-                    transcript = transcript_data.get("transcript")
-
-                    if transcript:
-                        st.success(f"🗣️ You (Transcribed): \"{transcript}\"")
-                        logger.info(f"Transcription successful: {transcript}")
-                        command_response_data = make_api_request(
-                            "POST",
-                            COMMAND_URL,
-                            json_payload={"text_command": transcript},
-                            operation_name="Voice Command"
+                        files_payload = {"file": (f"audio_segment.wav", f_audio, "audio/wav")}
+                        # Using make_api_request for transcription
+                        transcribe_data = make_api_request(
+                            "POST", 
+                            VOICE_TRANSCRIBE_URL, 
+                            files=files_payload, 
+                            operation_name="Voice Transcription for Gemini"
                         )
-                        if command_response_data:
-                            st.info(f"🤖 DebugIQ Agent: {command_response_data.get('spoken_text', 'No spoken response generated.')}")
-                            # Potentially trigger actions based on command_data.get('action_code') etc.
-                        else:
-                             st.warning("Voice command sent, but no actionable response from agent.")
-                    else:
-                        st.info("Transcription returned empty. Try speaking more clearly or ensure microphone is active.")
-                        logger.info("Transcription was empty.")
 
-                except requests.exceptions.RequestException as e:
-                    st.error(f"Voice processing error (API): {e}")
-                    logger.exception("Error during voice transcription/command API call")
-                except wave.Error as e:
-                    st.error(f"Could not create WAV file: {e}")
-                    logger.exception("Wave file creation error")
-                except Exception as e:
-                    st.error(f"An unexpected error occurred during voice processing: {e}")
-                    logger.exception("Unexpected error in voice processing block")
+                    transcript = transcribe_data.get("transcript") if transcribe_data and not transcribe_data.get("error") else None
+                    
+                    if transcript:
+                        logger.info(f"Transcription successful: {transcript}")
+                        st.session_state.chat_history.append({"role": "user", "content": transcript})
+                        # Rerun to show user message immediately
+                        st.rerun() 
+
+                        # Now send to Gemini via your backend
+                        # The backend should handle conversation history if needed
+                        gemini_payload = {
+                            "text_command": transcript,
+                            "conversation_history": st.session_state.chat_history[:-1] # Send previous history for context
+                        }
+                        status_indicator.info(f"🗣️ You (Transcribed): \"{transcript}\" - Waiting for Gemini...")
+
+                        gemini_response_data = make_api_request(
+                            "POST",
+                            GEMINI_CHAT_URL,
+                            json_payload=gemini_payload,
+                            operation_name="Gemini Chat"
+                        )
+
+                        if gemini_response_data and not gemini_response_data.get("error"):
+                            assistant_text_response = gemini_response_data.get("text_response", "Sorry, I didn't get that.")
+                            assistant_audio_base64 = gemini_response_data.get("audio_content_base64") # Expecting base64 audio from backend
+
+                            assistant_message = {"role": "assistant", "content": assistant_text_response}
+                            if assistant_audio_base64:
+                                assistant_message["audio_base64"] = assistant_audio_base64
+                            
+                            st.session_state.chat_history.append(assistant_message)
+                            status_indicator.empty() # Clear status
+                            st.rerun() # Rerun to display Gemini's response and play audio
+                        else:
+                            error_detail = gemini_response_data.get('details', 'No specific error details.') if gemini_response_data else "No response from Gemini endpoint."
+                            st.session_state.chat_history.append({"role": "assistant", "content": f"Sorry, I encountered an error: {error_detail}"})
+                            status_indicator.error(f"Error from Gemini: {error_detail}")
+                            # No st.rerun here, error shown, history updated if it happens next cycle.
+
+                    else:
+                        status_indicator.warning("Transcription returned empty or failed. Please try speaking again.")
+                        if transcribe_data and transcribe_data.get("error"):
+                             logger.error(f"Transcription error: {transcribe_data.get('details')}")
+                        else:
+                             logger.info("Transcription was empty.")
+
+                except Exception as e: # Catch errors in the try-block for processing
+                    status_indicator.error(f"An error occurred during voice processing: {e}")
+                    logger.exception("Unexpected error in Gemini voice processing block")
                 finally:
                     if temp_wav_file_path and os.path.exists(temp_wav_file_path):
                         try:
                             os.remove(temp_wav_file_path)
-                            logger.info(f"Temporary WAV file {temp_wav_file_path} removed.")
                         except OSError as e:
                             logger.error(f"Error removing temporary WAV file {temp_wav_file_path}: {e}")
-                    # Clear buffer and count AFTER processing (or attempting to)
                     st.session_state.audio_buffer = b""
                     st.session_state.audio_frame_count = 0
-                    # st.rerun() # Might be needed if state changes should immediately reflect elsewhere
+                    if not (ctx and ctx.audio_receiver and audio_frames): # If processing didn't complete due to no frames, clear indicator
+                        status_indicator.empty()
 
-    except av.error.TimeoutError: # Specifically catch av.error.TimeoutError
-        pass # Expected if no frames are available within the timeout, normal operation
+
+        elif ctx and ctx.audio_receiver: # No new frames, but receiver is active
+            status_indicator.empty() # Clear "Listening..." if no audio comes through for a bit
+            pass
+
+
+    except av.error.TimeoutError:
+        status_indicator.empty() # Clear "Listening..." if timeout occurs
+        pass # Expected if no frames are available within the timeout
     except Exception as e:
-        # Catch other potential errors from audio_receiver or frame processing
-        if ctx and ctx.audio_receiver and not ctx.audio_receiver.is_closed: # Check if receiver is still active
-             st.warning(f"An issue occurred with the audio stream: {e}. Try restarting the voice agent if issues persist.")
-             logger.error(f"Error processing audio frames: {e}", exc_info=True)
-        # If receiver is closed, it might be user stopping it, so error might not be needed.
+        if ctx and ctx.audio_receiver and not ctx.audio_receiver.is_closed:
+            st.warning(f"An issue occurred with the audio stream: {e}. Try restarting the voice agent.")
+            logger.error(f"Error processing audio frames for Gemini: {e}", exc_info=True)
+        status_indicator.empty()
 
-elif ctx and not ctx.audio_receiver:
-    # This state means the component is active but not receiving (e.g., user stopped microphone)
-    if st.session_state.audio_buffer: # If there's leftover buffer when mic stops
-        logger.info("Audio stream stopped with remaining buffer. Clearing buffer.")
+elif ctx and not ctx.audio_receiver : # Streamer active, but not receiving (mic stopped by user)
+    if 'chat_history' in st.session_state and st.session_state.chat_history:
+         if st.session_state.chat_history[-1]["role"] == "user" and "Processing..." in st.session_state.chat_history[-1]["content"]:
+             # Clean up if user stops mic mid-processing indicator
+             st.session_state.chat_history.pop()
+
+    if st.session_state.audio_buffer:
+        logger.info("Audio stream stopped by user with remaining buffer. Clearing buffer.")
         st.session_state.audio_buffer = b""
         st.session_state.audio_frame_count = 0
-    # st.sidebar.caption("Voice agent stopped or microphone not active.") # Optional feedback
+    # Optionally provide feedback that the agent is stopped
+    # st.caption("Voice agent stopped. Click 'Start' to speak.")
