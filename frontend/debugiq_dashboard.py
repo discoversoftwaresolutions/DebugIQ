@@ -68,8 +68,7 @@ for key, default_value in keys_to_clear.items():
     if key not in st.session_state:
         st.session_state[key] = default_value
     else:
-        st.session_state[key] = default_value
-
+        st.session_state[key] = default_value  # Properly indented block for the else statement
 # Define session_defaults after the loop
 session_defaults = {
     "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
