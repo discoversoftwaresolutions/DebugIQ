@@ -42,13 +42,14 @@ st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 
 # === Helper Functions === })        # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
+
 def clear_all_github_session_state():
     """Resets all GitHub-related session state and clears loaded analysis files."""
     logger.info("Clearing all GitHub session state and related analysis inputs...")
     
     # Ensure all keys exist before modifying them
     keys_to_clear = {
-        "github_repo_url_input": "",
+        "internal_github_repo_url_input": "",  # Use a separate key for internal state
         "current_github_repo_url": None,
         "github_branches": [],
         "github_selected_branch": None,
@@ -65,8 +66,7 @@ def clear_all_github_session_state():
         if key not in st.session_state:
             st.session_state[key] = default_value
         else:
-            st.session_state[key] = default_value
-session_defaults = {
+            st.session_state[key] = default_valuesession_defaults = {
     "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
     "audio_sample_width": DEFAULT_VOICE_SAMPLE_WIDTH,
     "audio_num_channels": DEFAULT_VOICE_CHANNELS,
