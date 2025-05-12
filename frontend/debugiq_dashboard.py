@@ -66,7 +66,8 @@ def clear_all_github_session_state():
         if key not in st.session_state:
             st.session_state[key] = default_value
         else:
-            st.session_state[key] = default_valuesession_defaults = {
+# === Session State Initialization ===
+session_defaults = {
     "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
     "audio_sample_width": DEFAULT_VOICE_SAMPLE_WIDTH,
     "audio_num_channels": DEFAULT_VOICE_CHANNELS,
@@ -82,18 +83,25 @@ def clear_all_github_session_state():
     "github_repo_owner": None,
     "github_repo_name": None,
     "analysis_results": {
-        "trace": None, "source_files_content": {}, "patch": None,
-        "explanation": None, "doc_summary": None, "patched_file_name": None,
-        "original_patched_file_content": None
+        "trace": None,
+        "source_files_content": {},
+        "patch": None,
+        "explanation": None,
+        "doc_summary": None,
+        "patched_file_name": None,
+        "original_patched_file_content": None,
     },
-    "qa_result": None, "inbox_data": None, "workflow_status_data": None,
-    "metrics_data": None, "qa_code_to_validate": None
+    "qa_result": None,
+    "inbox_data": None,
+    "workflow_status_data": None,
+    "metrics_data": None,
+    "qa_code_to_validate": None,
 }
+
+# Populate session state with defaults if not already set
 for key, default_value in session_defaults.items():
     if key not in st.session_state:
-        st.session_state[key] = default_value
-
-# === GitHub Repo Integration Sidebar (Full Version) ===
+        st.session_state[key] = default_value# === GitHub Repo Integration Sidebar (Full Version) ===
 with st.sidebar:
     st.markdown("### 📦 Load Code from GitHub")
     
