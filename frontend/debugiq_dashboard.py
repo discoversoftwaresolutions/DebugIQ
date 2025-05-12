@@ -63,7 +63,7 @@ def clear_all_github_session_state():
     }
 
     
-}
+
 for key, default_value in keys_to_clear.items():
     if key not in st.session_state:
         st.session_state[key] = default_value
