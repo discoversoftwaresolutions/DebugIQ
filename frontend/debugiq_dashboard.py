@@ -1,180 +1,119 @@
-from pathlib import Path
-
-# Define a cleaned and fully structured version of debugiq_dashboard.py
-dashboard_code = '''
-import os
 import streamlit as st
 import requests
-import difflib
 from streamlit_ace import st_ace
-from streamlit_autorefresh import st_autorefresh
-from debugiq_gemini_voice import process_voice_file, process_text_command
-import pandas as pd
-import plotly.express as px
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
+from debugiq_gemini_voice import process_text_command, process_voice_file
+import tempfile
+import av
+import wave
+import numpy as np
 
-# --- Branding + Config ---
-PROJECT_NAME = "DebugIQ"
-BACKEND_URL = "https://debugiq-backend.railway.internal"
-REPO_LINKS = {
-    "GitHub (Frontend)": "https://github.com/discoversoftwaresolutions/DebugIQ-frontend",
-    "GitHub (Backend)": "https://github.com/discoversoftwaresolutions/DebugIQ-backend"
-}
+# Config
+BACKEND_URL = "https://debugiq-backend.railway.app"
+st.set_page_config(page_title="DebugIQ", layout="wide")
 
-# --- Sidebar Branding ---
-st.sidebar.title(PROJECT_NAME)
-st.sidebar.markdown("### 🔗 Repositories")
-for name, url in REPO_LINKS.items():
-    st.sidebar.markdown(f"[{name}]({url})")
-st.sidebar.markdown("---")
-st.sidebar.markdown("🧠 Powered by DebugIQanalyze (GPT-4o) + DebugIQ Voice (Gemini)")
-st.sidebar.markdown("Maintained by Discover Software Solutions")
+# Sidebar
+st.sidebar.title("DebugIQ")
+st.sidebar.markdown("🚀 Powered by GPT-4o + Gemini")
+st.sidebar.markdown("[Frontend Repo](https://github.com/discoversoftwaresolutions/DebugIQ-frontend)")
+st.sidebar.markdown("[Backend Repo](https://github.com/discoversoftwaresolutions/DebugIQ-backend)")
 
-# --- Main Interface ---
-st.title("🧠 DebugIQ Agentic Dashboard")
-st.markdown("A unified agent interface for autonomous debugging, documentation, QA, and workflow orchestration.")
+# Tabs
+tabs = st.tabs(["📄 Trace + Patch", "✅ QA", "📘 Docs", "📣 Notices", "🤖 Workflow", "🎙️ Voice"])
 
-# --- Tabs ---
-tabs = st.tabs([
-    "📄 Trace + Patch",
-    "✅ QA",
-    "📘 Docs",
-    "📣 Issue Notices",
-    "🤖 Autonomous Workflow",
-    "🔍 Workflow Check",
-    "📊 Metrics"
-])
-
-# -------------------------------
-# 📄 Tab 1: Trace + Patch (DebugIQanalyze)
-# -------------------------------
+# Tab 1: Patch
 with tabs[0]:
-    st.header("📄 DebugIQanalyze: Patch from Traceback")
-    uploaded = st.file_uploader("Upload traceback or code file", type=["py", "txt"])
+    st.header("📄 Upload Trace or Code")
+    uploaded = st.file_uploader("Upload traceback or .py file", type=["py", "txt"])
     if uploaded:
-        code_text = uploaded.read().decode("utf-8")
-        st.code(code_text, language="python")
-        if st.button("🔧 Analyze and Patch with DebugIQanalyze"):
-            with st.spinner("Calling DebugIQanalyze (GPT-4o)..."):
-                res = requests.post(f"{BACKEND_URL}/suggest_patch", json={"code": code_text})
-                if res.status_code == 200:
-                    patch = res.json()
-                    st.code(patch["diff"], language="diff")
-                    st.markdown(f"💡 **Explanation:** {patch['explanation']}")
-                else:
-                    st.error("Patch generation failed.")
-    st.subheader("🧑‍💻 Live Editor")
-    st_ace(language="python", theme="twilight", height=250)
-
-# -------------------------------
-# ✅ Tab 2: QA Validation
-# -------------------------------
-with tabs[1]:
-    st.header("✅ QA with DebugIQanalyze")
-    qa_input = st.text_area("Paste updated code for validation:")
-    if st.button("Run QA Validation"):
-        with st.spinner("Validating with DebugIQanalyze..."):
-            qa_response = requests.post(f"{BACKEND_URL}/run_qa", json={"code": qa_input})
-            if qa_response.status_code == 200:
-                st.json(qa_response.json())
+        code = uploaded.read().decode("utf-8")
+        st.code(code, language="python")
+        if st.button("🛠 Suggest Patch"):
+            res = requests.post(f"{BACKEND_URL}/suggest_patch", json={"code": code})
+            if res.ok:
+                patch = res.json()
+                st.code(patch.get("diff", ""), language="diff")
+                st.markdown(f"💡 {patch.get('explanation', '')}")
+                st.session_state.edited_code = patch.get("patched_code", "")
             else:
-                st.error("QA validation unavailable.")
+                st.error("Patch suggestion failed.")
 
-# -------------------------------
-# 📘 Tab 3: Documentation
-# -------------------------------
+# Tab 2: QA
+with tabs[1]:
+    st.header("✅ Run QA")
+    qa_input = st.text_area("Paste updated code", value=st.session_state.get("edited_code", ""))
+    if st.button("Validate QA"):
+        res = requests.post(f"{BACKEND_URL}/run_qa", json={"code": qa_input})
+        if res.ok:
+            st.json(res.json())
+        else:
+            st.error("QA validation failed.")
+
+# Tab 3: Docs
 with tabs[2]:
-    st.header("📘 Auto-Documentation with DebugIQanalyze")
-    doc_input = st.text_area("Paste code to generate documentation:")
-    if st.button("📝 Generate Patch Doc"):
-        doc_response = requests.post(f"{BACKEND_URL}/generate_doc", json={"code": doc_input})
-        if doc_response.status_code == 200:
-            st.markdown(doc_response.json().get("doc", "No documentation generated."))
+    st.header("📘 Auto-Documentation")
+    doc_input = st.text_area("Paste code to document")
+    if st.button("📄 Generate Docs"):
+        res = requests.post(f"{BACKEND_URL}/generate_doc", json={"code": doc_input})
+        if res.ok:
+            st.markdown(res.json().get("doc", ""))
         else:
             st.error("Doc generation failed.")
 
-# -------------------------------
-# 📣 Tab 4: Issue Notices
-# -------------------------------
+# Tab 4: Notices
 with tabs[3]:
-    st.header("📣 Detected Issues (Autonomous Agent Summary)")
-    if st.button("🔍 Fetch Notices"):
-        issues = requests.get(f"{BACKEND_URL}/issues/inbox")
-        if issues.status_code == 200:
-            st.json(issues.json())
+    st.header("📣 Issue Inbox")
+    if st.button("🔄 Refresh Issues"):
+        res = requests.get(f"{BACKEND_URL}/issues/inbox")
+        if res.ok:
+            st.json(res.json())
         else:
-            st.warning("No issue data or backend error.")
+            st.error("No issues found.")
 
-# -------------------------------
-# 🤖 Tab 5: Autonomous Workflow
-# -------------------------------
+# Tab 5: Autonomous Workflow
 with tabs[4]:
-    st.header("🤖 DebugIQ Autonomous Agent Workflow")
-    issue_id = st.text_input("Enter Issue ID", placeholder="e.g. ISSUE-101")
-    if st.button("▶️ Run DebugIQ Workflow"):
-        if not issue_id:
-            st.warning("Please enter a valid issue ID.")
+    st.header("🤖 Autonomous Workflow")
+    issue_id = st.text_input("Enter Issue ID (e.g. ISSUE-101)")
+    if st.button("▶️ Run Agent Workflow"):
+        res = requests.post(f"{BACKEND_URL}/run_autonomous_workflow", json={"issue_id": issue_id})
+        if res.ok:
+            st.success("Workflow complete")
+            st.json(res.json())
         else:
-            with st.spinner("Running DebugIQ agents..."):
-                response = requests.post(
-                    f"{BACKEND_URL}/run_autonomous_workflow",
-                    json={"issue_id": issue_id}
-                )
-                if response.status_code == 200:
-                    st.success("✅ Workflow completed")
-                    st.json(response.json())
-                else:
-                    st.error("❌ Workflow error from backend.")
+            st.error("Workflow failed")
 
-# -------------------------------
-# 🔍 Tab 6: Workflow Check
-# -------------------------------
+# Tab 6: Voice (Upload or Mic)
 with tabs[5]:
-    st.header("🔍 Workflow Integrity Check")
-    check = requests.get(f"{BACKEND_URL}/workflow_check")
-    if check.status_code == 200:
-        st.json(check.json())
-    else:
-        st.warning("Workflow status unavailable.")
+    st.header("🎙️ Gemini Voice Agent")
+    audio = st.file_uploader("Upload a .wav voice file", type=["wav"])
+    if audio and st.button("🧠 Send to Gemini (Upload)"):
+        result = process_voice_file(audio.read())
+        st.markdown(result.get("response", "Error"))
 
-# -------------------------------
-# 📊 Tab 7: Metrics
-# -------------------------------
-with tabs[6]:
-    st.header("📊 Agent Metrics")
-    st_autorefresh(interval=30000, key="autorefresh_metrics")
-    metrics = requests.get(f"{BACKEND_URL}/metrics/status")
-    if metrics.status_code == 200:
-        st.json(metrics.json())
-    else:
-        st.warning("Metrics unavailable.")
+    st.markdown("#### 🎤 Or Use Microphone")
+    class AudioProcessor:
+        def __init__(self): self.frames = []
+        def recv(self, frame): self.frames.append(frame.to_ndarray()); return frame
 
-# -------------------------------
-# 🧠 GPT-4o Text Command
-# -------------------------------
-st.markdown("---")
-st.subheader("🧠 Text Command to DebugIQanalyze (GPT-4o)")
-cmd = st.text_input("Enter your agent command here...")
-if st.button("Send to GPT-4o"):
-    with st.spinner("Processing via GPT-4o..."):
-        result = process_text_command(cmd)
-        if "response" in result:
-            st.success("✅ Agent Response:")
-            st.markdown(result["response"])
-        else:
-            st.error(result.get("error", "Unknown error"))
+    ctx = webrtc_streamer(
+        key="mic",
+        mode=WebRtcMode.SENDONLY,
+        in_audio_enabled=True,
+        client_settings=ClientSettings(
+            media_stream_constraints={"audio": True, "video": False},
+            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+        ),
+        audio_processor_factory=AudioProcessor
+    )
 
-# -------------------------------
-# 🎙️ Gemini Voice Command Upload
-# -------------------------------
-st.markdown("---")
-st.subheader("🎙️ Voice Command to DebugIQ Voice Agent (Gemini)")
-voice_file = st.file_uploader("Upload a .wav file", type=["wav"])
-if voice_file and st.button("Send Voice to Gemini Agent"):
-    with st.spinner("Processing via Gemini..."):
-        audio_bytes = voice_file.read()
-        result = process_voice_file(audio_bytes)
-        if "response" in result:
-            st.success("✅ Gemini Agent Response:")
-            st.markdown(result["response"])
-        else:
-            st.error(result.get("error", "No response")
+    if ctx and ctx.audio_receiver and st.button("🎧 Send Mic Audio to Gemini"):
+        pcm = b''.join([f.tobytes() for f in ctx.audio_processor.frames])
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            with wave.open(tmp.name, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(pcm)
+            with open(tmp.name, "rb") as f:
+                result = process_voice_file(f.read())
+                st.markdown(result.get("response", "Gemini error"))
