@@ -66,11 +66,7 @@ def clear_all_github_session_state():
         if key not in st.session_state:
             st.session_state[key] = default_value
         else:
-            st.session_state[key] = default_value
-        }
-    }
-
-    
+            st.session_state[key] = default_value    
 
 for key, default_value in keys_to_clear.items():
     if key not in st.session_state:
