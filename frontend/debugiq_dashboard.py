@@ -267,7 +267,7 @@ try:
     ctx = webrtc_streamer(
         key=f"gemini_voice_agent_stream_{BACKEND_URL}", # Changed key slightly
         mode=WebRtcMode.SENDONLY,
-        client_settings=ClientSettings( # Make sure ClientSettings is imported correctly
+        
             rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
             media_stream_constraints={"audio": True, "video": False},
         ),
