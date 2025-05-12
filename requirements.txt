@@ -1,5 +1,5 @@
 streamlit
-streamlit_webrtc
+streamlit-webrtc>=0.47.0  
 streamlit-ace
 streamlit-autorefresh
 
