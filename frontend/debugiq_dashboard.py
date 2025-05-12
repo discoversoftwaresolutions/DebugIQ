@@ -1,7 +1,8 @@
+
 import streamlit as st
 import requests
 from streamlit_ace import st_ace
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, 
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from debugiq_gemini_voice import process_text_command, process_voice_file
 import tempfile
 import av
@@ -99,10 +100,8 @@ with tabs[5]:
         key="mic",
         mode=WebRtcMode.SENDONLY,
         in_audio_enabled=True,
-        client_settings=ClientSettings(
-            media_stream_constraints={"audio": True, "video": False},
-            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-        ),
+        media_stream_constraints={"audio": True, "video": False},
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
         audio_processor_factory=AudioProcessor
     )
 
