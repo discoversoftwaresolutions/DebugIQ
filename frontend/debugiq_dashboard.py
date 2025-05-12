@@ -62,11 +62,15 @@ def clear_all_github_session_state():
         }
     }
 
-    for key, default_value in keys_to_clear.items():
-        if key not in st.session_state:
-            st.session_state[key] = default_value
-        else:
-# === Session State Initialization ===
+    
+}
+for key, default_value in keys_to_clear.items():
+    if key not in st.session_state:
+        st.session_state[key] = default_value
+    else:
+        st.session_state[key] = default_value
+
+# Define session_defaults after the loop
 session_defaults = {
     "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
     "audio_sample_width": DEFAULT_VOICE_SAMPLE_WIDTH,
@@ -96,9 +100,7 @@ session_defaults = {
     "workflow_status_data": None,
     "metrics_data": None,
     "qa_code_to_validate": None,
-}
-
-# Populate session state with defaults if not already set
+}# Populate session state with defaults if not already set
 for key, default_value in session_defaults.items():
     if key not in st.session_state:
         st.session_state[key] = default_value# === GitHub Repo Integration Sidebar (Full Version) ===
