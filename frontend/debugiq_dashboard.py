@@ -42,7 +42,6 @@ st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 
 # === Helper Functions === })        # Keep other analysis results like patch, explanation unless specifically cleared elsewhere
-
 def clear_all_github_session_state():
     """Resets all GitHub-related session state and clears loaded analysis files."""
     logger.info("Clearing all GitHub session state and related analysis inputs...")
@@ -59,6 +58,15 @@ def clear_all_github_session_state():
         "analysis_results": {
             "trace": None,
             "source_files_content": {},
+        }
+    }
+    
+    # Clear or initialize session state variables
+    for key, default_value in keys_to_clear.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
+        else:
+            st.session_state[key] = default_value
         }
     }
 
