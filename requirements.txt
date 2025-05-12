@@ -3,6 +3,7 @@ streamlit-webrtc>=0.47.0
 streamlit-ace
 streamlit-autorefresh
 
+python-3.9
 numpy
 av
 soundfile
