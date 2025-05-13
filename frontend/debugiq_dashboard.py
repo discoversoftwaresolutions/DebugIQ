@@ -129,15 +129,21 @@ def clear_analysis_inputs():
 def clear_analysis_outputs():
     """Clears generated patch, explanation, and other analysis outputs."""
     logger.info("Clearing analysis outputs (patch, explanation, etc.).")
-   
-st.session_state.analysis_results.update({
-    'patch': None,
-    'explanation': None,
-    'doc_summary': None,  # Assuming doc_summary comes from analysis results
-    'patched_file_name': None,
-    'original_patched_file_content': None
-})
-st.session_state.edited_patch = ""  # Also clear any edited patch state
+
+    # Reset analysis results state
+    st.session_state.analysis_results.update({
+        'patch': None,
+        'explanation': None,
+        'doc_summary': None,  # Assuming doc_summary comes from analysis results
+        'patched_file_name': None,
+        'original_patched_file_content': None
+    })
+    
+    # Clear any edited patch state
+    st.session_state.edited_patch = ""
+
+    # Optional: Log the new state after clearing
+    # logger.info(f"Analysis outputs state after clearing: {st.session_state.analysis_results.get('patch')}, {st.session_state.analysis_results.get('explanation')}")st.session_state.edited_patch = ""  # Also clear any edited patch state
 Also clear any edited patch state
 # logger.info(f"Analysis outputs state after clearing: {st.session_state.analysis_results.get('patch')}, {st.session_state.analysis_results.get('explanation')}")
 
