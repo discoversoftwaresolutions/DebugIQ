@@ -5,7 +5,7 @@ import requests
 import os
 import difflib
 from streamlit_ace import st_ace
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 import logging
 import base64
 import re
