@@ -126,22 +126,32 @@ def frames_to_wav_bytes(frames):
 # === WebRTC Audio Frame Callback ===
 # Moved this function definition to the top level to ensure it's defined before use
 def audio_frame_callback(frame: av.AudioFrame):
-    """Callback function to receive audio frames from the browser."""
-    # This function runs in a separate thread managed by streamlit-webrtc.
-    # Accessing st.session_state directly in a separate thread can sometimes be problematic
-    # in complex scenarios, but for simple appends, it often works with Streamlit's rerun model.
-    # For robustness in heavy use, consider a thread-safe queue.
-    if st.session_state.get('is_recording', False):
-        st.session_state.audio_buffer.append(frame)
-        # Store format info from the first frame if not already stored
-        if 'audio_format' not in st.session_state:
-             st.session_state.audio_format = {
-                 'sample_rate': frame.sample_rate,
-                 'format_name': frame.format.name,
-                 'channels': frame.layout.channels,
-                 'sample_width_bytes': frame.format.bytes
-             }
+    """Callback function to receive and process audio frames from the browser."""
+    import threading
 
+    # Use a thread-safe queue to handle audio frames
+    if "audio_buffer" not in st.session_state:
+        st.session_state.audio_buffer = []
+
+    # Lock to ensure thread-safe access to session state
+    lock = threading.Lock()
+
+    with lock:
+        if st.session_state.get('is_recording', False):
+            # Append the audio frame to the session state's buffer
+            st.session_state.audio_buffer.append(frame)
+
+            # Store format info from the first frame if not already stored
+            if 'audio_format' not in st.session_state:
+                st.session_state.audio_format = {
+                    'sample_rate': frame.sample_rate,
+                    'format_name': frame.format.name,
+                    'channels': frame.layout.channels,
+                    'sample_width_bytes': frame.format.bytes
+                }
+
+            # Log the audio frame details for debugging purposes
+            print(f"Audio frame received: {len(st.session_state.audio_buffer)} frames buffered.")
 
 # === Main Application ===
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
