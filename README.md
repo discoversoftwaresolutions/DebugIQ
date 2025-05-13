@@ -1,6 +1,6 @@
 # 🧠 DebugIQ 
 
-The official Streamlit-based front-end for **DebugIQ**, an open-source autonomous debugging agent powered by GPT-4o and voice interaction. This UI provides trace analysis, code patch generation, QA validation, documentation generation, and an optional voice assistant interface.
+The official Streamlit-based front-end for **DebugIQ**, an open-source autonomous debugging agent powered by GPT-4o and voice interaction. This UI provides trace analysis, code patch generation, QA validation, documentation generation, autonomous workflow+PR and an optional voice assistant interface.
 
 ---
 
