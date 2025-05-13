@@ -261,7 +261,7 @@ except Exception as e:
     clear_github_selection_state()
     st.session_state.current_github_repo_url = None  # Reset the URL on error
     
- # Update the state to mark processing complete
+    
 st.session_state.current_github_repo_url = active_github_url
 st.success(f"Repo '{owner}/{repo}' branches loaded.")
 
