@@ -403,46 +403,49 @@ if current_branches:
     logger.info(f"Selected branch index: {branch_idx}")
 
     # Display a dropdown for branch selection
-    selected_branch = st.selectbox(
-        "Select Branch",
-        current_branches,
-        index=branch_idx,
-        key="github_branch_selector",
-        on_change=lambda: logger.info(
+  # Branch Selector
+selected_branch = st.selectbox(
+    "Select Branch",
+    current_branches,
+    index=branch_idx,
+    key="github_branch_selector",
+)
+
+on_change=lambda: (
+        logger.info(
             f"Branch selector changed to {st.session_state.github_selected_branch}. Resetting path stack."
-        ) or st.session_state.update({"github_path_stack": [""]}),
-    )h}. Resetting path stack.") or st.session_state.update({"github_path_stack": [""]}) # Reset path on branch change
-        )
-        # Streamlit automatically updates st.session_state.github_selected_branch due to the key
+        ) or st.session_state.update({"github_path_stack": [""]})  # Reset path on branch change
+    ),
+)
+# Streamlit automatically updates st.session_state.github_selected_branch due to the key
 
-    # --- File Browser Logic (if owner, repo, branch are set) ---
-    gh_owner = st.session_state.get("github_repo_owner")
-    gh_repo = st.session_state.get("github_repo_name")
-    gh_branch = st.session_state.get("github_selected_branch")
-    current_path_stack = st.session_state.get("github_path_stack", [""])
-    current_path_str = "/".join([p for p in current_path_stack if p])
+# --- File Browser Logic (if owner, repo, branch are set) ---
+gh_owner = st.session_state.get("github_repo_owner")
+gh_repo = st.session_state.get("github_repo_name")
+gh_branch = st.session_state.get("github_selected_branch")
+current_path_stack = st.session_state.get("github_path_stack", [""])
+current_path_str = "/".join([p for p in current_path_stack if p])
 
-    if gh_owner and gh_repo and gh_branch:
-        logger.info(f"File browser active for {gh_owner}/{gh_repo} @ {gh_branch} path /{current_path_str}")
+if gh_owner and gh_repo and gh_branch:
+    logger.info(f"File browser active for {gh_owner}/{gh_repo} @ {gh_branch} path /{current_path_str}")
 
-        @st.cache_data(ttl=120, show_spinner="Fetching directory contents...")
-        def fetch_gh_dir_content(owner_str, repo_str, path_str, branch_str):
-            url = f"https://api.github.com/repos/{owner_str}/{repo_str}/contents/{path_str}?ref={branch_str}"
-            logger.info(f"Fetching GitHub dir (cached): {url}")
-            try:
-                r = requests.get(url, timeout=10)
-                r.raise_for_status()
-                return r.json()
-            except requests.exceptions.RequestException as e:
-                st.warning(f"Dir content fetch error for '{path_str}': {e}")
-                logger.error(f"Dir content fetch error for '{path_str}': {e}")
-            except json.JSONDecodeError as e:
-                st.warning(f"Dir content JSON error for '{path_str}': {e}")
-                logger.error(f"Dir content JSON error for '{path_str}': {e}")
-            return None
+    @st.cache_data(ttl=120, show_spinner="Fetching directory contents...")
+    def fetch_gh_dir_content(owner_str, repo_str, path_str, branch_str):
+        url = f"https://api.github.com/repos/{owner_str}/{repo_str}/contents/{path_str}?ref={branch_str}"
+        logger.info(f"Fetching GitHub dir (cached): {url}")
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.RequestException as e:
+            st.warning(f"Dir content fetch error for '{path_str}': {e}")
+            logger.error(f"Dir content fetch error for '{path_str}': {e}")
+        except json.JSONDecodeError as e:
+            st.warning(f"Dir content JSON error for '{path_str}': {e}")
+            logger.error(f"Dir content JSON error for '{path_str}': {e}")
+        return None
 
-        entries = fetch_gh_dir_content(gh_owner, gh_repo, current_path_str, gh_branch)
-
+    entries = fetch_gh_dir_content(gh_owner, gh_repo, current_path_str, gh_branch)
         if entries is not None:
             logger.info(f"Fetched {len(entries)} items for path /{current_path_str}")
             # Display current path and "Up" button
