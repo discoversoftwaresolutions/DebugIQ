@@ -155,7 +155,7 @@ def audio_frame_callback(frame: av.AudioFrame):
 
 # === Main Application ===
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
-st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
+st.title("🧠 DebugIQ ")
 
 # Initialize session state for recording and chat history
 if 'is_recording' not in st.session_state:
