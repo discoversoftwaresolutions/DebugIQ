@@ -123,6 +123,25 @@ def frames_to_wav_bytes(frames):
         logger.error(f"Error creating WAV file: {e}")
         return None
 
+# === WebRTC Audio Frame Callback ===
+# Moved this function definition to the top level to ensure it's defined before use
+def audio_frame_callback(frame: av.AudioFrame):
+    """Callback function to receive audio frames from the browser."""
+    # This function runs in a separate thread managed by streamlit-webrtc.
+    # Accessing st.session_state directly in a separate thread can sometimes be problematic
+    # in complex scenarios, but for simple appends, it often works with Streamlit's rerun model.
+    # For robustness in heavy use, consider a thread-safe queue.
+    if st.session_state.get('is_recording', False):
+        st.session_state.audio_buffer.append(frame)
+        # Store format info from the first frame if not already stored
+        if 'audio_format' not in st.session_state:
+             st.session_state.audio_format = {
+                 'sample_rate': frame.sample_rate,
+                 'format_name': frame.format.name,
+                 'channels': frame.layout.channels,
+                 'sample_width_bytes': frame.format.bytes
+             }
+
 
 # === Main Application ===
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
@@ -334,7 +353,12 @@ with chat_container:
         # Add play button or automatically play AI audio response
         if message["role"] == "ai" and message.get("audio"):
              # Use a unique key for each audio player in the history - using content hash for stability
-             audio_hash = base64.b64encode(message['audio']).decode('utf-8')[:10] # Simple hash for key
+             # Ensure audio is bytes for hashing
+             if isinstance(message['audio'], bytes):
+                 audio_hash = base64.b64encode(message['audio']).decode('utf-8')[:10] # Simple hash for key
+             else:
+                 audio_hash = "error" # Indicate issue if not bytes
+
              try:
                  # Use the sample rate stored with the message if available, default to 44100
                  st.audio(message["audio"], format='audio/wav', sample_rate=message.get("sample_rate", 44100), key=f"audio_player_{audio_hash}")
@@ -354,7 +378,9 @@ with col2:
     stop_button = st.button("⏹️ Stop Recording", key="voice_stop_btn", disabled=not st.session_state.is_recording)
 
 
-# The streamer component itself. Updated parameters based on streamlit-webrtc changes.
+# --- webrtc_streamer component ---
+# This component needs to be rendered for the audio stream to be available.
+# It runs in the background and provides audio frames via the callback.
 # Adding try/except block for robustness during initialization
 try:
     ctx = webrtc_streamer(
@@ -371,18 +397,6 @@ except Exception as e:
     st.error(f"Failed to initialize voice agent microphone: {e}")
     logger.exception("Error initializing webrtc_streamer for Voice Agent")
     ctx = None # Set ctx to None if initialization fails
-
-# The streamer component itself. Updated parameters based on streamlit-webrtc changes.
-ctx = webrtc_streamer(
-    key="voice_agent_streamer_bottom", # Unique key for this component instance
-    mode=WebRtcMode.SENDONLY, # Send audio from browser to server
-    # Configuration previously in client_settings is now top-level parameters:
-    frontend_rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}, # Client-side WebRTC config
-    media_stream_constraints={"audio": True, "video": False}, # Media constraints (audio only)
-    audio_receiver_callback=audio_frame_callback,
-    # Optional media constraints can still be specified
-    media_stream_constraints_opt={"audio": {"sampleRate": 44100, "channelCount": 1}} # Request specific format
-)
 
 
 # Handle button clicks in the main Streamlit thread
@@ -443,8 +457,6 @@ if stop_button:
                 status_placeholder.info(f"Status: {st.session_state.recording_status}")
                 with st.spinner("Getting response from Gemini..."):
                     # Send the transcribed text to Gemini. The backend needs to interpret this.
-                    # For a true conversational agent triggering tasks, the backend's /gemini_chat
-                    # or a dedicated endpoint would need to handle intent recognition.
                     gemini_payload = {"text": user_text}
                     gemini_response = make_api_request("POST", ENDPOINTS["gemini_chat"], gemini_payload)
 
