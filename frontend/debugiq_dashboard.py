@@ -288,7 +288,7 @@ condition_met = active_github_url and (
 )
 logger.info(f"Branch fetch condition met: {condition_met}")
          match = re.match(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$", active_github_url)
-         if not match:
+if not match:
              logger.warning(f"Invalid GitHub URL format in fetch check: {active_github_url}")
              st.warning("Invalid GitHub URL format. Use: https://github.com/owner/repo")
              clear_github_selection_state() # Clear GitHub states on invalid format
