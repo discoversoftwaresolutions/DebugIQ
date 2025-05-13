@@ -2,9 +2,9 @@
 
 services:
   - type: web
-    name: DebugIQ-Frontend
+    name: DebugIQ
     env: python
-    repo: https://github.com/discoversoftwaresolutions/DebugIQ-frontend
+    repo: https://github.com/discoversoftwaresolutions/DebugIQ
     branch: main
     buildCommand: pip install -r requirements.txt
     startCommand: streamlit run debugiq_dashboard_v2.py --server.port=10000 --server.address=0.0.0.0
