@@ -135,8 +135,8 @@ def clear_analysis_outputs():
         'doc_summary': None,  # Assuming doc_summary comes from analysis results
         'patched_file_name': None,
         'original_patched_file_content': None
-     
-     st.session_state.edited_patch = "" # Also clear any edited patch state
+     })
+    st.session_state.edited_patch = "" # Also clear any edited patch state
     # logger.info(f"Analysis outputs state after clearing: {st.session_state.analysis_results.get('patch')}, {st.session_state.analysis_results.get('explanation')}")
 
 
