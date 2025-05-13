@@ -188,16 +188,15 @@ st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 
 # === GitHub Repo Integration Sidebar ===
 with st.sidebar:
-    st.markdown("### 📦 Load Code from GitHub")
+    st.markdown("### 📦 Load Code from GitHub")
 
-    # Text input for GitHub URL
-    # The value is automatically managed by Streamlit in st.session_state.github_repo_url_input
-    github_url_input_widget_value = st.text_input(
-    "Public GitHub Repository URL",
-    placeholder="https://github.com/owner/repo",
-    key="github_repo_url_input",
-)
-
+    # Text input for GitHub URL
+    # The value is automatically managed by Streamlit in st.session_state.github_repo_url_input
+    github_url_input_widget_value = st.text_input(
+        "Public GitHub Repository URL",
+        placeholder="https://github.com/owner/repo",
+        key="github_repo_url_input",
+    )
 if st.button(f"Load/Process Repo", key=f"load_repo_button_{github_url_input_widget_value}", use_container_width=True):
     input_url = github_url_input_widget_value.strip()
     logger.info(f"Load/Process Repo button clicked. Input URL: '{input_url}'")
