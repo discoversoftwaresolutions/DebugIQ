@@ -394,20 +394,17 @@ with col2:
 # Adding try/except block for robustness during initialization
 try:
     ctx = webrtc_streamer(
-        key="voice_agent_streamer_bottom", # Unique key for this component instance
-        mode=WebRtcMode.SENDONLY, # Send audio from browser to server
+        key="voice_agent_streamer_bottom",  # Unique key for this component instance
+        mode=WebRtcMode.SENDONLY,  # Send audio from browser to server
         # Configuration previously in client_settings is now top-level parameters:
-        frontend_rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}, # Client-side WebRTC config
-        media_stream_constraints={"audio": True, "video": False}, # Media constraints (audio only)
-        audio_receiver_callback=audio_frame_callback, # !! ESSENTIAL FOR CAPTURING AUDIO FRAMES !!
-        # Optional media constraints can still be specified
-        media_stream_constraints_opt={"audio": {"sampleRate": 44100, "channelCount": 1}} # Request specific format
+        frontend_rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},  # Client-side WebRTC config
+        media_stream_constraints={"audio": True, "video": False},  # Media constraints (audio only)
+        audio_frame_callback=audio_frame_callback,  # Updated: Callback for processing audio frames
     )
 except Exception as e:
     st.error(f"Failed to initialize voice agent microphone: {e}")
     logger.exception("Error initializing webrtc_streamer for Voice Agent")
-    ctx = None # Set ctx to None if initialization fails
-
+    ctx = None  # Set ctx to None if initialization fails
 
 # Handle button clicks in the main Streamlit thread
 if start_button:
