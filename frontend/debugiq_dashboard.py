@@ -296,47 +296,50 @@ if not match:
     st.session_state.current_github_repo_url = None  # Ensure loaded URL is explicitly None
     logger.info("Reset current_github_repo_url to None due to invalid URL format.")
 else:
-    owner, repo = match.groups()
-    logger.info(f"Valid URL parsed: owner={owner}, repo={repo}")             # Update owner/repo names
-             st.session_state.github_repo_owner = owner
-             st.session_state.github_repo_name = repo
+    fetch API error. Reset current_github_repo_url to None.")
+owner, repo = match.groups()
+logger.info(f"Valid URL parsed: owner={owner}, repo={repo}")  # Update owner/repo names
+st.session_state.github_repo_owner = owner
+st.session_state.github_repo_name = repo
 
-             api_branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
-             logger.info(f"Attempting branch fetch for: {api_branches_url}")
+api_branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+logger.info(f"Attempting branch fetch for: {api_branches_url}")
 
-             try:
-                 with st.spinner(f"Loading branches for {owner}/{repo}..."):
-                     branches_res = requests.get(api_branches_url, timeout=10)
-                     branches_res.raise_for_status()
-                     branches_data = branches_res.json()
-                     st.session_state.github_branches = [b["name"] for b in branches_data]
-                 logger.info(f"Branch fetch successful. Found {len(st.session_state.github_branches)} branches.")
+try:
+    with st.spinner(f"Loading branches for {owner}/{repo}..."):
+        branches_res = requests.get(api_branches_url, timeout=10)
+        branches_res.raise_for_status()
+        branches_data = branches_res.json()
+        st.session_state.github_branches = [b["name"] for b in branches_data]
 
-                 if st.session_state.github_branches:
-                     # Set branch selection to the first branch if none selected or old selection invalid
-                     if st.session_state.github_selected_branch not in st.session_state.github_branches:
-                          st.session_state.github_selected_branch = st.session_state.github_branches[0]
-                     st.session_state.github_path_stack = [""] # Reset path on successful repo load
-                     st.success(f"Repo '{owner}/{repo}' branches loaded.")
-                     # --- Crucial Update for Loop Prevention ---
-                     # Mark the URL as successfully loaded *only after successful API call and branches found*
-                     st.session_state.current_github_repo_url = active_github_url
-                     logger.info(f"Branch fetch successful. Set current_github_repo_url to: '{st.session_state.current_github_repo_url}'")
-                 else:
-                     st.warning("No branches found for this repository.")
-                     clear_github_selection_state() # Clear GitHub states if no branches
-                     st.session_state.current_github_repo_url = None # Reset on no branches found
-                     logger.warning("Branch fetch found no branches. Reset current_github_repo_url to None.")
+    logger.info(f"Branch fetch successful. Found {len(st.session_state.github_branches)} branches.")
 
+    if st.session_state.github_branches:
+        # Set branch selection to the first branch if none selected or old selection invalid
+        if st.session_state.github_selected_branch not in st.session_state.github_branches:
+            st.session_state.github_selected_branch = st.session_state.github_branches[0]
+        
+        # Reset path on successful repo load
+        st.session_state.github_path_stack = [""]
+        st.success(f"Repo '{owner}/{repo}' branches loaded.")
+        
+        # --- Crucial Update for Loop Prevention ---
+        # Mark the URL as successfully loaded *only after successful API call and branches found*
+        st.session_state.current_github_repo_url = active_github_url
+        logger.info(f"Branch fetch successful. Set current_github_repo_url to: '{st.session_state.current_github_repo_url}'")
+    else:
+        st.warning("No branches found for this repository.")
+        clear_github_selection_state()  # Clear GitHub states if no branches
+        st.session_state.current_github_repo_url = None  # Reset on no branches found
+        logger.warning("Branch fetch found no branches. Reset current_github_repo_url to None.")
 
-             except requests.exceptions.RequestException as e:
-                 logger.error(f"❌ Branch fetch API error: {e}")
-                 st.error(f"❌ Branch fetch error: {e}")
-                 clear_github_selection_state() # Clear GitHub states on error
-                 st.session_state.current_github_repo_url = None # Reset on API error to allow retry
-                 logger.warning("Branch fetch API error. Reset current_github_repo_url to None.")
-
-             except json.JSONDecodeError as e:
+except requests.exceptions.RequestException as e:
+    logger.error(f"❌ Branch fetch API error: {e}")
+    st.error(f"❌ Branch fetch error: {e}")
+    clear_github_selection_state()  # Clear GitHub states on error
+    st.session_state.current_github_repo_url = None  # Reset on API error to allow retry
+    logger.warning("Branch fetch API error. Reset current_github_repo_url to None.")
+except json.JSONDecodeError as e:
                   logger.error(f"❌ Branch JSON decode error: {e}")
                   st.error(f"❌ Branch JSON error: Could not parse response. {e}")
                   clear_github_selection_state() # Clear GitHub states on error
