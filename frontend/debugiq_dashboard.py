@@ -295,14 +295,19 @@ if not match:
     clear_github_selection_state()  # Clear GitHub states on invalid format
     st.session_state.current_github_repo_url = None  # Ensure loaded URL is explicitly None
     logger.info("Reset current_github_repo_url to None due to invalid URL format.")
-else:
-    fetch API error. Reset current_github_repo_url to None.")
-owner, repo = match.groups()
-logger.info(f"Valid URL parsed: owner={owner}, repo={repo}")  # Update owner/repo names
-st.session_state.github_repo_owner = owner
-st.session_state.github_repo_name = repo
 
-api_branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+else:
+    logger.error("Fetch API error. Reset current_github_repo_url to None.")
+    clear_github_selection_state()  # Clear GitHub-related session states
+    st.session_state.current_github_repo_url = None  # Reset the URL to allow retries
+
+# Parse the owner and repository name from the matched groups
+owner, repo = match.groups()
+logger.info(f"Valid URL parsed: owner={owner}, repo={repo}")  # Log the parsed owner/repo names
+
+# Update the session state with the parsed owner and repository name
+st.session_state.github_repo_owner = owner
+st.session_state.github_repo_name = repoapi_branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
 logger.info(f"Attempting branch fetch for: {api_branches_url}")
 
 try:
