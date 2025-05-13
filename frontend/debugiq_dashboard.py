@@ -345,31 +345,41 @@ except requests.exceptions.RequestException as e:
     st.session_state.current_github_repo_url = None  # Reset on API error to allow retry
     logger.warning("Branch fetch API error. Reset current_github_repo_url to None.")
 except json.JSONDecodeError as e:
-                  logger.error(f"❌ Branch JSON decode error: {e}")
-                  st.error(f"❌ Branch JSON error: Could not parse response. {e}")
-                  clear_github_selection_state() # Clear GitHub states on error
-                  st.session_state.current_github_repo_url = None # Reset on JSON error to allow retry
-                  logger.warning("Branch fetch JSON error. Reset current_github_repo_url to None.")
+  
+    # Handle JSON decode error during branch fetch
+logger.error(f"❌ Branch JSON decode error: {e}")
+st.error(f"❌ Branch JSON error: Could not parse response. {e}")
+clear_github_selection_state()  # Clear GitHub-related session states
+st.session_state.current_github_repo_url = None  # Reset URL to allow retry
+logger.warning("Branch fetch JSON error. Reset current_github_repo_url to None.")
 
-    # --- Branch Selection ---
-    # Only show branch selector if branches were successfully loaded
-    current_branches = st.session_state.get("github_branches", [])
-    if current_branches:
-        logger.info(f"Showing branch selector. {len(current_branches)} branches available.")
-        try:
-            # Find the index of the currently selected branch, default to 0 if not found
-            branch_idx = current_branches.index(st.session_state.github_selected_branch) if st.session_state.github_selected_branch in current_branches else 0
-        except ValueError:
-            # Fallback in case of unexpected value, should be covered by above check
-            branch_idx = 0
-        logger.info(f"Selected branch index: {branch_idx}")
+# --- Branch Selection ---
+# Only show the branch selector if branches were successfully loaded
+current_branches = st.session_state.get("github_branches", [])
+if current_branches:
+    logger.info(f"Showing branch selector. {len(current_branches)} branches available.")
 
-        selected_branch = st.selectbox(
-            "Select Branch",
-            current_branches,
-            index=branch_idx,
-            key="github_branch_selector",
-            on_change=lambda: logger.info(f"Branch selector changed to {st.session_state.github_selected_branch}. Resetting path stack.") or st.session_state.update({"github_path_stack": [""]}) # Reset path on branch change
+    try:
+        # Find the index of the currently selected branch, default to 0 if not found
+        branch_idx = (
+            current_branches.index(st.session_state.github_selected_branch)
+            if st.session_state.github_selected_branch in current_branches else 0
+        )
+    except ValueError:
+        # Fallback in case of unexpected value; should be covered by above check
+        branch_idx = 0
+    logger.info(f"Selected branch index: {branch_idx}")
+
+    # Display a dropdown for branch selection
+    selected_branch = st.selectbox(
+        "Select Branch",
+        current_branches,
+        index=branch_idx,
+        key="github_branch_selector",
+        on_change=lambda: logger.info(
+            f"Branch selector changed to {st.session_state.github_selected_branch}. Resetting path stack."
+        ) or st.session_state.update({"github_path_stack": [""]}),
+    )h}. Resetting path stack.") or st.session_state.update({"github_path_stack": [""]}) # Reset path on branch change
         )
         # Streamlit automatically updates st.session_state.github_selected_branch due to the key
 
