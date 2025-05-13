@@ -5,7 +5,8 @@ import requests
 import os
 import difflib
 from streamlit_ace import st_ace
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
+# Updated import: ClientSettings is no longer needed/active as a separate class for client config
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 import logging
 import base64
 import re
@@ -78,7 +79,7 @@ def frames_to_wav_bytes(frames):
         logger.error(f"Error accessing frame properties: {e}")
         return None
 
-    # Check for a common interleaved format like s16
+    # Check for common formats and convert to raw bytes
     # streamlit-webrtc typically provides s16, s32p, or f32p
     # s16 is signed 16-bit int, interleaved
     if 's16' in format_name and frame_0.layout.name in ['mono', 'stereo']:
@@ -93,6 +94,7 @@ def frames_to_wav_bytes(frames):
     elif 's32p' in format_name or 'f32p' in format_name:
          # Planar formats: data for each channel is in a separate plane. Need to interleave.
          try:
+             # Convert planes to numpy arrays and interleave
              all_channels_data = [np.concatenate([frame.planes[i].to_ndarray() for frame in frames]) for i in range(channels)]
              # Stack channel data (e.g., [samples_ch1], [samples_ch2]) -> [[s1_ch1, s1_ch2], [s2_ch1, s2_ch2], ...]
              interleaved_data = np.stack(all_channels_data, axis=-1)
@@ -102,8 +104,9 @@ def frames_to_wav_bytes(frames):
              logger.error(f"Error processing planar audio frames: {e}")
              return None
     else:
-        logger.error(f"Unsupported audio format or layout for WAV conversion: {format_name}, {frame_0.layout.name}.")
+        logger.error(f"Unsupported audio format or layout for WAV conversion: {format_name}, {frame_0.layout.name}. Support for s16, s32p, f32p (mono/stereo) implemented.")
         return None
+
 
     # Create a WAV file in memory
     try:
@@ -148,7 +151,7 @@ if github_url:
         st.sidebar.error("Invalid GitHub URL.")
 
 # === Application Tabs ===
-# Removed Voice Agent tab
+# Removed Voice Agent tab as it's now a dedicated section
 tabs = st.tabs(["📄 Traceback + Patch", "✅ QA Validation", "📘 Documentation", "📣 Issues", "🤖 Workflow", "🔍 Workflow Check", "📈 Metrics"])
 tab_trace, tab_qa, tab_doc, tab_issues, tab_workflow, tab_status, tab_metrics = tabs
 
@@ -320,6 +323,7 @@ st.markdown("---") # Add a separator below the tabs
 st.markdown("---") # Add another separator for clear visual distinction
 st.header("🎙️ DebugIQ Voice Agent")
 st.write("Interact conversationally with DebugIQ using your voice or text. Ask questions or give commands related to debugging tasks.")
+st.write("You can ask things like: 'Analyze the traceback', 'Generate documentation for this code', or ask general programming questions.") # Guide the user
 
 # Display chat history
 chat_container = st.container(height=400) # Use a container for chat history with a fixed height and scroll
@@ -329,10 +333,11 @@ with chat_container:
         st.markdown(f"**{role}:** {message['content']}")
         # Add play button or automatically play AI audio response
         if message["role"] == "ai" and message.get("audio"):
-             # Use a unique key for each audio player in the history
-             audio_key = f"audio_{id(message)}" # Use object ID as key, though potentially not stable across reruns
+             # Use a unique key for each audio player in the history - using content hash for stability
+             audio_hash = base64.b64encode(message['audio']).decode('utf-8')[:10] # Simple hash for key
              try:
-                st.audio(message["audio"], format='audio/wav', sample_rate=message.get("sample_rate", 44100)) # Add sample rate if known
+                 # Use the sample rate stored with the message if available, default to 44100
+                 st.audio(message["audio"], format='audio/wav', sample_rate=message.get("sample_rate", 44100), key=f"audio_player_{audio_hash}")
              except Exception as e:
                  st.warning(f"Could not play audio: {e}") # Handle potential issues with st.audio
 
@@ -349,35 +354,34 @@ with col2:
     stop_button = st.button("⏹️ Stop Recording", key="voice_stop_btn", disabled=not st.session_state.is_recording)
 
 
-# --- webrtc_streamer component ---
-# This component needs to be rendered for the audio stream to be available.
-# It runs in the background and provides audio frames via the callback.
-def audio_frame_callback(frame: av.AudioFrame):
-    """Callback function to receive audio frames from the browser."""
-    # This function runs in a separate thread managed by streamlit-webrtc.
-    if st.session_state.get('is_recording', False):
-        st.session_state.audio_buffer.append(frame)
-        # Optionally store format/sample rate if it varies, but assuming consistent
-        if 'audio_format' not in st.session_state:
-             st.session_state.audio_format = {
-                 'sample_rate': frame.sample_rate,
-                 'format_name': frame.format.name,
-                 'channels': frame.layout.channels,
-                 'sample_width_bytes': frame.format.bytes
-             }
+# The streamer component itself. Updated parameters based on streamlit-webrtc changes.
+# Adding try/except block for robustness during initialization
+try:
+    ctx = webrtc_streamer(
+        key="voice_agent_streamer_bottom", # Unique key for this component instance
+        mode=WebRtcMode.SENDONLY, # Send audio from browser to server
+        # Configuration previously in client_settings is now top-level parameters:
+        frontend_rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}, # Client-side WebRTC config
+        media_stream_constraints={"audio": True, "video": False}, # Media constraints (audio only)
+        audio_receiver_callback=audio_frame_callback, # !! ESSENTIAL FOR CAPTURING AUDIO FRAMES !!
+        # Optional media constraints can still be specified
+        media_stream_constraints_opt={"audio": {"sampleRate": 44100, "channelCount": 1}} # Request specific format
+    )
+except Exception as e:
+    st.error(f"Failed to initialize voice agent microphone: {e}")
+    logger.exception("Error initializing webrtc_streamer for Voice Agent")
+    ctx = None # Set ctx to None if initialization fails
 
-
-# The streamer component itself.
+# The streamer component itself. Updated parameters based on streamlit-webrtc changes.
 ctx = webrtc_streamer(
     key="voice_agent_streamer_bottom", # Unique key for this component instance
     mode=WebRtcMode.SENDONLY, # Send audio from browser to server
-    client_settings=ClientSettings(
-        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-        media_stream_constraints={"audio": True, "video": False}, # Only capture audio
-    ),
+    # Configuration previously in client_settings is now top-level parameters:
+    frontend_rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}, # Client-side WebRTC config
+    media_stream_constraints={"audio": True, "video": False}, # Media constraints (audio only)
     audio_receiver_callback=audio_frame_callback,
-    # Set desired audio format (optional, browser negotiates, but can influence)
-    media_stream_constraints_opt={"audio": {"sampleRate": 44100, "channelCount": 1}} # Example: Request mono, 44.1kHz
+    # Optional media constraints can still be specified
+    media_stream_constraints_opt={"audio": {"sampleRate": 44100, "channelCount": 1}} # Request specific format
 )
 
 
@@ -385,10 +389,10 @@ ctx = webrtc_streamer(
 if start_button:
     st.session_state.is_recording = True
     st.session_state.audio_buffer = [] # Clear buffer on start
+    st.session_state.pop('audio_format', None) # Clear format info on start
     st.session_state.recording_status = "Recording..."
     # No clearing chat history here, allowing for conversation
     status_placeholder.info(f"Status: {st.session_state.recording_status}")
-    # st.rerun() # Can use rerun to force UI update immediately, but often not necessary
 
 
 if stop_button:
@@ -399,9 +403,9 @@ if stop_button:
     # Process the recorded audio after stopping
     if st.session_state.audio_buffer:
         logger.info(f"Processing {len(st.session_state.audio_buffer)} frames after stopping.")
-        # Use the recorded format if available, fallback to default
+        # Get audio format info recorded during capture
         audio_format_info = st.session_state.get('audio_format', {})
-        # frames_to_wav_bytes doesn't strictly need format info passed, it infers from frames[0]
+        # Convert frames to WAV bytes
         wav_data = frames_to_wav_bytes(st.session_state.audio_buffer)
 
         if wav_data:
@@ -426,22 +430,21 @@ if stop_button:
 
             # Add user's transcription to chat history
             # Only add non-empty transcription (excluding placeholder error)
-            if user_text and not user_text.startswith("Transcription Error") and user_text != "Could not transcribe audio.":
+            if user_text and not user_text.startswith("Transcription Error") and user_text.strip() != "" and user_text != "Could not transcribe audio.":
                  st.session_state.chat_history.append({"role": "user", "content": user_text})
 
             # --- Send transcription to Gemini Chat ---
             ai_response_text = ""
             ai_response_audio = None # To store TTS audio bytes
 
-            # Only send to Gemini if transcription was successful and has content
-            if user_text and not user_text.startswith("Transcription Error") and user_text != "Could not transcribe audio.":
+            # Only send to Gemini if transcription was successful and has meaningful content
+            if user_text and not user_text.startswith("Transcription Error") and user_text.strip() != "" and user_text != "Could not transcribe audio.":
                 st.session_state.recording_status = "Sending to Gemini..."
                 status_placeholder.info(f"Status: {st.session_state.recording_status}")
                 with st.spinner("Getting response from Gemini..."):
-                    # Include chat history for conversational context (Optional, depends on backend endpoint)
-                    # Simple payload for now: {"text": user_text}
-                    # For history: {"history": st.session_state.chat_history, "current_message": user_text}
-                    # We'll stick to just sending the current text to the existing endpoint
+                    # Send the transcribed text to Gemini. The backend needs to interpret this.
+                    # For a true conversational agent triggering tasks, the backend's /gemini_chat
+                    # or a dedicated endpoint would need to handle intent recognition.
                     gemini_payload = {"text": user_text}
                     gemini_response = make_api_request("POST", ENDPOINTS["gemini_chat"], gemini_payload)
 
@@ -456,8 +459,8 @@ if stop_button:
                          status_placeholder.info(f"Status: {st.session_state.recording_status}")
                          with st.spinner("Generating AI speech..."):
                              tts_payload = {"text": ai_response_text}
-                             # Request raw audio bytes instead of JSON/Base64 if backend supports it
-                             tts_response_data = make_api_request("POST", ENDPOINTS["tts"], tts_payload, return_json=False) # Get raw bytes
+                             # Request raw audio bytes (or Base64) from backend TTS endpoint
+                             tts_response_data = make_api_request("POST", ENDPOINTS["tts"], tts_payload, return_json=False) # Expecting raw bytes
 
                          if not isinstance(tts_response_data, dict) or "error" not in tts_response_data:
                              # Assuming tts_response_data is the raw WAV bytes
@@ -487,9 +490,8 @@ if stop_button:
 
 
             # Add AI's response (text and potentially audio) to chat history
-            # Only add AI response if there's text or audio
             if ai_response_text or ai_response_audio:
-                # Include sample rate if known from audio format info for st.audio
+                # Include sample rate if known from audio format info for st.audio playback
                  ai_message = {"role": "ai", "content": ai_response_text, "audio": ai_response_audio}
                  if audio_format_info.get("sample_rate"):
                       ai_message["sample_rate"] = audio_format_info["sample_rate"]
@@ -507,7 +509,7 @@ if stop_button:
         status_placeholder.info(f"Status: {st.session_state.recording_status}")
 
     st.session_state.audio_buffer = [] # Clear buffer after processing
-    st.session_state.pop('audio_format', None) # Clear audio format info
+    st.session_state.pop('audio_format', None) # Clear audio format info after processing
     # Trigger a rerun to update the chat history display
     st.rerun()
 
@@ -532,7 +534,7 @@ if send_text_button and text_query:
     st.session_state.recording_status = "Sending to Gemini..."
     status_placeholder.info(f"Status: {st.session_state.recording_status}")
     with st.spinner("Getting response from Gemini..."):
-        # Again, sending only current text, not history, to the current endpoint
+        # Send the text query to Gemini. Backend interprets.
         gemini_payload = {"text": user_text}
         gemini_response = make_api_request("POST", ENDPOINTS["gemini_chat"], gemini_payload)
 
@@ -569,7 +571,7 @@ if send_text_button and text_query:
 
     # Add AI's response (text and potentially audio) to chat history
     if ai_response_text or ai_response_audio:
-        # We don't have audio_format_info for text input, default sample rate for st.audio is usually fine
+        # For text input, we don't have captured audio format info. Default sample rate is usually ok for st.audio.
         st.session_state.chat_history.append({"role": "ai", "content": ai_response_text, "audio": ai_response_audio})
 
 
@@ -577,4 +579,4 @@ if send_text_button and text_query:
 
     # Clear the text input after sending
     st.session_state.text_chat_input = "" # Use the session state key
-    st.rerun()
+    st.rerun() # Trigger a rerun to update the chat history display
