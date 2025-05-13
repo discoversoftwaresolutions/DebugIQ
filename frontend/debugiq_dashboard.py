@@ -57,7 +57,7 @@ GEMINI_CHAT_URL = f"{BACKEND_URL}/gemini_chat"
 
 
 DEFAULT_VOICE_SAMPLE_RATE = 16000
-DEFAULT_VOICE_SAMPLE_WIDTH = 2  # 16-bit audio (2 bytes)
+DEFAULT_VOICE_SAMPLE_WIDTH = 2 # Corrected space here
 DEFAULT_VOICE_CHANNELS = 1  # Mono
 AUDIO_PROCESSING_THRESHOLD_SECONDS = 2
 
@@ -771,34 +771,12 @@ with tab_workflow_status:
     elif current_status and current_status.get("error"):
          st.error(f"Failed to load workflow status: {current_status.get('details', 'Unknown error.')}")
     else:
-        st.info("Click 'Refresh Workflow Status' to fetch data.")
+        st.info("Click 'Refresh Workflow Status' to see data.")
 
 with tab_repo_insights:
     st.header("📊 Repository Structure Insights")
     st.markdown("""
     This tab is intended to display a "digital chart" or visual representation of your loaded GitHub repository's content.
-
-    To implement this, I need a bit more information:
-
-    1.  **What kind of chart are you envisioning?**
-        * A **Treemap** or **Sunburst chart** to show file/directory sizes or counts?
-        * A **Bar/Pie chart** for language distribution or file type breakdown?
-        * Something else?
-
-    2.  **What specific data from the repository should this chart visualize?**
-        * File sizes?
-        * Number of files per directory?
-        * Lines of code per language (requires more advanced analysis on the backend)?
-        * Distribution of file extensions?
-
-    Once you provide these details, we can work on fetching the necessary data (likely via the GitHub API within the sidebar logic or a dedicated backend call) and then use a library like **Plotly Express** or **Altair** to create and display the interactive chart here.
-
-    For example, if you wanted a chart of languages used in the repository, the sidebar could fetch that data when a repository is loaded, store it in `st.session_state`, and this tab would then use it to render the chart.
-    """)
-
-    # Example placeholder for where chart might go if data was available
-    gh_owner_insight = st.session_state.get("github_repo_owner")
-    gh_repo_insight = st.session_state.get("github_repo_name")
 
     if gh_owner_insight and gh_repo_insight:
         st.info(f"Insights for repository: {gh_owner_insight}/{gh_repo_insight} would appear here once specified.")
