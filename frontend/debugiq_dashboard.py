@@ -261,20 +261,32 @@ except Exception as e:
     clear_github_selection_state()
     st.session_state.current_github_repo_url = None  # Reset the URL on error
     
-    # This logic runs on every rerun and is triggered when github_repo_url_input changes
-    # and the Load/Process Repo button's logic sets current_github_repo_url to trigger it.
-    active_github_url = st.session_state.get("github_repo_url_input", "").strip()
-    current_loaded_url = st.session_state.get("current_github_repo_url")
+ # Update the state to mark processing complete
+st.session_state.current_github_repo_url = active_github_url
+st.success(f"Repo '{owner}/{repo}' branches loaded.")
 
-    logger.info(f"Branch fetch check start. active_github_url='{active_github_url}', current_loaded_url='{current_loaded_url}'")
-    # The condition to trigger branch fetching:
-    # 1. There's an active URL in the input
-    # 2. We haven't successfully loaded branches for this exact URL yet (current_loaded_url is None or different)
-    # 3. Avoid triggering if current_loaded_url is the "PROCESSING_" marker set by the button
-    condition_met = active_github_url and (current_loaded_url is None or (isinstance(current_loaded_url, str) and not current_loaded_url.startswith("PROCESSING_") and current_loaded_url != active_github_url))
-    logger.info(f"Branch fetch condition met: {condition_met}")
+try:
+    # Processing logic here...
+    pass  # Placeholder for actual processing logic
+except Exception as e:
+    logger.error(f"Error processing GitHub URL: {e}")
+    st.error(f"Failed to process GitHub URL: {e}")
+    clear_github_selection_state()
+    st.session_state.current_github_repo_url = None  # Reset the URL on error
 
-    if condition_met:
+# The condition to trigger branch fetching:
+# 1. There's an active URL in the input
+# 2. We haven't successfully loaded branches for this exact URL yet (current_loaded_url is None or different)
+# 3. Avoid triggering if current_loaded_url is the "PROCESSING_" marker set by the button
+condition_met = active_github_url and (
+    current_loaded_url is None 
+    or (
+        isinstance(current_loaded_url, str) 
+        and not current_loaded_url.startswith("PROCESSING_") 
+        and current_loaded_url != active_github_url
+    )
+)
+logger.info(f"Branch fetch condition met: {condition_met}")    if condition_met:
          match = re.match(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$", active_github_url)
          if not match:
              logger.warning(f"Invalid GitHub URL format in fetch check: {active_github_url}")
