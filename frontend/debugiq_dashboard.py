@@ -279,14 +279,14 @@ except Exception as e:
 # 2. We haven't successfully loaded branches for this exact URL yet (current_loaded_url is None or different)
 # 3. Avoid triggering if current_loaded_url is the "PROCESSING_" marker set by the button
 condition_met = active_github_url and (
-    current_loaded_url is None 
+    current_loaded_url is None
     or (
-        isinstance(current_loaded_url, str) 
-        and not current_loaded_url.startswith("PROCESSING_") 
+        isinstance(current_loaded_url, str)
+        and not current_loaded_url.startswith("PROCESSING_")
         and current_loaded_url != active_github_url
     )
 )
-logger.info(f"Branch fetch condition met: {condition_met}")    if condition_met:
+logger.info(f"Branch fetch condition met: {condition_met}")
          match = re.match(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$", active_github_url)
          if not match:
              logger.warning(f"Invalid GitHub URL format in fetch check: {active_github_url}")
