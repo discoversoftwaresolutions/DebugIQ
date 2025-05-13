@@ -67,75 +67,75 @@ SUPPORTED_SOURCE_EXTENSIONS = (
     ".html", ".css", ".md", ".ts", ".tsx", ".json", ".yaml", ".yml",
     ".sh", ".R", ".swift", ".kt", ".scala"
 )
-RECOGNIZED_FILE_EXTENSIONS = SUPPORTED_SOURCE_EXTENSIONS + (TRACEBACK_EXTENSION,))
+RECOGNIZED_FILE_EXTENSIONS = SUPPORTED_SOURCE_EXTENSIONS + (TRACEBACK_EXTENSION,)
 RECOGNIZED_FILE_EXTENSIONS = SUPPORTED_SOURCE_EXTENSIONS + (TRACEBACK_EXTENSION,)
 
 # === Helper Functions ===
 
 def make_api_request(method, url, json_payload=None, files=None, operation_name="API Request"):
-    """
-    Placeholder function to make API requests to the backend.
-    Replace with your actual implementation (e.g., using requests, handling auth, etc.).
-    """
-    logger.info(f"Attempting to make {method} request to {url} for {operation_name}")
-    try:
-        response = requests.request(method, url, json=json_payload, files=files, timeout=30)
-        logger.info(f"{operation_name} response status code: {response.status_code}")
-        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-        logger.info(f"Successful {method} request to {url}")
-        # Attempt to return JSON, handle cases where response might be empty or not JSON
-        try:
-            return response.json()
-        except json.JSONDecodeError:
-             logger.warning(f"Response for {url} was not JSON. Status: {response.status_code}")
-             # Return a success indicator even if no JSON, if status code is 2xx
-             if 200 <= response.status_code < 300:
-                 return {"success": True, "message": "Request successful, no JSON response."}
-             else:
-                  return {"error": True, "details": f"Non-JSON response, status code: {response.status_code}"}
+    """
+    Placeholder function to make API requests to the backend.
+    Replace with your actual implementation (e.g., using requests, handling auth, etc.).
+    """
+    logger.info(f"Attempting to make {method} request to {url} for {operation_name}")
+    try:
+        response = requests.request(method, url, json=json_payload, files=files, timeout=30)
+        logger.info(f"{operation_name} response status code: {response.status_code}")
+        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+        logger.info(f"Successful {method} request to {url}")
+        # Attempt to return JSON, handle cases where response might be empty or not JSON
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            logger.warning(f"Response for {url} was not JSON. Status: {response.status_code}")
+            # Return a success indicator even if no JSON, if status code is 2xx
+            if 200 <= response.status_code < 300:
+                return {"success": True, "message": "Request successful, no JSON response."}
+            else:
+                return {"error": True, "details": f"Non-JSON response, status code: {response.status_code}"}
 
-    except requests.exceptions.Timeout:
-        st.error(f"⏰ {operation_name} failed: Request timed out. URL: {url}")
-        logger.error(f"{operation_name} timed out: {url}")
-        return {"error": True, "details": "Request timed out."}
-    except requests.exceptions.RequestException as e:
-        st.error(f"❌ {operation_name} failed: {e}. URL: {url}")
-        logger.error(f"{operation_name} failed for {url}: {e}")
-        return {"error": True, "details": str(e)}
+    except requests.exceptions.Timeout:
+        st.error(f"⏰ {operation_name} failed: Request timed out. URL: {url}")
+        logger.error(f"{operation_name} timed out: {url}")
+        return {"error": True, "details": "Request timed out."}
+    except requests.exceptions.RequestException as e:
+        st.error(f"❌ {operation_name} failed: {e}. URL: {url}")
+        logger.error(f"{operation_name} failed for {url}: {e}")
+        return {"error": True, "details": str(e)}
 
 
 def clear_github_selection_state():
-    """Resets only GitHub-related selection state in the sidebar."""
-    logger.info("Clearing GitHub selection state.")
-    # Do NOT clear github_repo_url_input here, let the text_input widget manage its value
-    st.session_state.current_github_repo_url = None
-    st.session_state.github_branches = []
-    st.session_state.github_selected_branch = None
-    st.session_state.github_path_stack = [""]
-    st.session_state.github_repo_owner = None
-    st.session_state.github_repo_name = None
-    # Note: This does NOT clear analysis results
+    """Resets only GitHub-related selection state in the sidebar."""
+    logger.info("Clearing GitHub selection state.")
+    # Do NOT clear github_repo_url_input here, let the text_input widget manage its value
+    st.session_state.current_github_repo_url = None
+    st.session_state.github_branches = []
+    st.session_state.github_selected_branch = None
+    st.session_state.github_path_stack = [""]
+    st.session_state.github_repo_owner = None
+    st.session_state.github_repo_name = None
+    # Note: This does NOT clear analysis results
     # logger.info(f"GitHub selection state after clearing: {st.session_state.get('current_github_repo_url')}, {st.session_state.get('github_branches')}, {st.session_state.get('github_path_stack')}")
 
 
 def clear_analysis_inputs():
-    """Clears loaded traceback and source files used as analysis inputs."""
-    logger.info("Clearing analysis inputs (trace and sources).")
-    st.session_state.analysis_results['trace'] = None
-    st.session_state.analysis_results['source_files_content'] = {}
+    """Clears loaded traceback and source files used as analysis inputs."""
+    logger.info("Clearing analysis inputs (trace and sources).")
+    st.session_state.analysis_results['trace'] = None
+    st.session_state.analysis_results['source_files_content'] = {}
     # logger.info(f"Analysis inputs state after clearing: {st.session_state.analysis_results.get('trace')}, {st.session_state.analysis_results.get('source_files_content')}")
 
 
 def clear_analysis_outputs():
-     """Clears generated patch, explanation, and other analysis outputs."""
-     logger.info("Clearing analysis outputs (patch, explanation, etc.).")
-     st.session_state.analysis_results.update({
-         'patch': None,
-         'explanation': None,
-         'doc_summary': None, # Assuming doc_summary comes from analysis results
-         'patched_file_name': None,
-         'original_patched_file_content': None
-     })
+    """Clears generated patch, explanation, and other analysis outputs."""
+    logger.info("Clearing analysis outputs (patch, explanation, etc.).")
+    st.session_state.analysis_results.update({
+        'patch': None,
+        'explanation': None,
+        'doc_summary': None,  # Assuming doc_summary comes from analysis results
+        'patched_file_name': None,
+        'original_patched_file_content': None
+    })     })
      st.session_state.edited_patch = "" # Also clear any edited patch state
     # logger.info(f"Analysis outputs state after clearing: {st.session_state.analysis_results.get('patch')}, {st.session_state.analysis_results.get('explanation')}")
 
