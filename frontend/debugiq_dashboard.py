@@ -249,13 +249,18 @@ if current_loaded_url and current_loaded_url.startswith("PROCESSING_"):
             logger.info(f"Branch fetch successful. Found {len(st.session_state.github_branches)} branches.")
 
             # Update the state to mark processing complete
-            st.session_state.current_github_repo_url = active_github_url
-            st.success(f"Repo '{owner}/{repo}' branches loaded.")
-        except Exception as e:
-            logger.error(f"Error processing GitHub URL: {e}")
-            st.error(f"Failed to process GitHub URL: {e}")
-            clear_github_selection_state()
-            st.session_state.current_github_repo_url = None    # --- GitHub URL Parsing & Branch Fetch ---
+st.session_state.current_github_repo_url = active_github_url
+st.success(f"Repo '{owner}/{repo}' branches loaded.")
+    
+try:
+    # Processing logic here...
+    pass  # Placeholder for actual processing logic
+except Exception as e:
+    logger.error(f"Error processing GitHub URL: {e}")
+    st.error(f"Failed to process GitHub URL: {e}")
+    clear_github_selection_state()
+    st.session_state.current_github_repo_url = None  # Reset the URL on error
+    
     # This logic runs on every rerun and is triggered when github_repo_url_input changes
     # and the Load/Process Repo button's logic sets current_github_repo_url to trigger it.
     active_github_url = st.session_state.get("github_repo_url_input", "").strip()
