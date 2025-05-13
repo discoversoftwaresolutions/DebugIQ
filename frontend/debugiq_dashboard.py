@@ -150,40 +150,39 @@ Also clear any edited patch state
 
 # === Session State Initialization ===
 session_defaults = {
-    "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
-    "audio_sample_width": DEFAULT_VOICE_SAMPLE_WIDTH,
-    "audio_num_channels": DEFAULT_VOICE_CHANNELS,
-    "audio_buffer": b"",
-    "audio_frame_count": 0,
-    "chat_history": [],
-    "edited_patch": "",
-    "github_repo_url_input": "", # Stores the value of the text input widget
-    "current_github_repo_url": None, # Stores the URL that branches were successfully loaded for
-    "github_branches": [],
-    "github_selected_branch": None,
-    "github_path_stack": [""], # Stack to manage current directory path in GitHub browser
-    "github_repo_owner": None,
-    "github_repo_name": None,
-    "analysis_results": {
-        "trace": None, # Loaded traceback content
-        "source_files_content": {}, # Dictionary of {file_path: content} for source files
-        "patch": None, # Generated or edited patch content
-        "explanation": None, # Explanation of the patch
-        "doc_summary": None, # Documentation summary (can come from analysis or separate doc gen)
-        "patched_file_name": None, # Name of the file the patch applies to
-        "original_patched_file_content": None # Original content of the file being patched
-    },
-    "qa_result": None, # Result of QA validation
-    "inbox_data": None, # Data from the issues inbox
-    "workflow_status_data": None, # Data from workflow status check
-    "metrics_data": None, # Data from system metrics
-    "qa_code_to_validate": None # Code specifically loaded for QA validation (maybe redundant with analysis_results['patch'])
+    "audio_sample_rate": DEFAULT_VOICE_SAMPLE_RATE,
+    "audio_sample_width": DEFAULT_VOICE_SAMPLE_WIDTH,
+    "audio_num_channels": DEFAULT_VOICE_CHANNELS,
+    "audio_buffer": b"",
+    "audio_frame_count": 0,
+    "chat_history": [],
+    "edited_patch": "",
+    "github_repo_url_input": "",  # Stores the value of the text input widget
+    "current_github_repo_url": None,  # Stores the URL that branches were successfully loaded for
+    "github_branches": [],
+    "github_selected_branch": None,
+    "github_path_stack": [""],  # Stack to manage current directory path in GitHub browser
+    "github_repo_owner": None,
+    "github_repo_name": None,
+    "analysis_results": {
+        "trace": None,  # Loaded traceback content
+        "source_files_content": {},  # Dictionary of {file_path: content} for source files
+        "patch": None,  # Generated or edited patch content
+        "explanation": None,  # Explanation of the patch
+        "doc_summary": None,  # Documentation summary (can come from analysis or separate doc gen)
+        "patched_file_name": None,  # Name of the file the patch applies to
+        "original_patched_file_content": None  # Original content of the file being patched
+    },
+    "qa_result": None,  # Result of QA validation
+    "inbox_data": None,  # Data from the issues inbox
+    "workflow_status_data": None,  # Data from workflow status check
+    "metrics_data": None,  # Data from system metrics
+    "qa_code_to_validate": None  # Code specifically loaded for QA validation (maybe redundant with analysis_results['patch'])
 }
-for key, default_value in session_defaults.items():
-    if key not in st.session_state:
-        st.session_state[key] = default_value
 
-# === Streamlit Page Configuration ===
+for key, default_value in session_defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = default_value# === Streamlit Page Configuration ===
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ Autonomous Debugging Dashboard")
 
