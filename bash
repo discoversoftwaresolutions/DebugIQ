@@ -1,1 +1,1 @@
-pip show streamlit-webrtc
+pip install --no-cache-dir streamlit-webrtc
