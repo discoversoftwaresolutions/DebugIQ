@@ -184,46 +184,71 @@ with st.sidebar:
 
     # Text input for GitHub URL
     # The value is automatically managed by Streamlit in st.session_state.github_repo_url_input
-    github_url_input_widget_value = st.text_input( # Capture widget value
-        "Public GitHub Repository URL",
-        placeholder="https://github.com/owner/repo",
-        key="github_repo_url_input",
-        # No on_change needed here to clear state, button click handles processing/clearing
-    )
+    github_url_input_widget_value = st.text_input(
+    "Public GitHub Repository URL",
+    placeholder="https://github.com/owner/repo",
+    key="github_repo_url_input",
+)
 
-    # Button to trigger loading or resetting
-    # Using a unique key incorporating the input value can help track intended action
-    if st.button(f"Load/Process Repo", key=f"load_repo_button_{github_url_input_widget_value}", use_container_width=True):
-        # When the button is clicked, we explicitly trigger the load logic below
-        # and handle clearing based on whether the input is empty or a new repo.
-        input_url = github_url_input_widget_value.strip() # Use the value captured from the widget
+if st.button(f"Load/Process Repo", key=f"load_repo_button_{github_url_input_widget_value}", use_container_width=True):
+    input_url = github_url_input_widget_value.strip()
+    logger.info(f"Load/Process Repo button clicked. Input URL: '{input_url}'")
 
-        logger.info(f"Load/Process Repo button clicked. Input URL: '{input_url}'")
+    if not input_url:
+        # Clear GitHub state and reset analysis results if the input is empty
+        logger.info("Input URL is empty. Clearing GitHub state and analysis results.")
+        clear_github_selection_state()
+        clear_analysis_inputs()
+        clear_analysis_outputs()
+        st.info("GitHub input cleared and analysis reset.")
+        st.session_state.current_github_repo_url = None
+    elif not input_url.startswith("PROCESSING_") and input_url != st.session_state.current_github_repo_url:
+        # Set processing marker for new valid input and rerun
+        logger.info(f"New valid URL detected: '{input_url}'. Preparing to process.")
+        clear_analysis_inputs()
+        clear_analysis_outputs()
+        st.session_state.current_github_repo_url = "PROCESSING_" + input_url
+        st.rerun()
+    else:
+        logger.warning(f"Button clicked but no valid state change detected. Current URL: {st.session_state.current_github_repo_url}")
 
-        if not input_url:
-            # If the input is empty when the button is clicked, clear GitHub selection
-            logger.info("Input URL is empty. Clearing GitHub state and analysis results.")
-            clear_github_selection_state()
-            clear_analysis_inputs()
-            clear_analysis_outputs()
-            st.info("GitHub input cleared and analysis reset.")
-            st.session_state.current_github_repo_url = None # Ensure loaded URL is cleared
-        else:
-            # A valid URL is entered, mark for processing below
-            # We also clear previous analysis results when explicitly loading a NEW repo
-            logger.info(f"Input URL is valid: '{input_url}'. Clearing previous analysis results.")
-            clear_analysis_inputs()
-            clear_analysis_outputs()
-            # Setting current_github_repo_url to a value different from active_github_url
-            # will trigger branch fetching logic below in the *next* rerun.
-            # Temporarily set it to a marker to indicate processing is intended.
-            st.session_state.current_github_repo_url = "PROCESSING_" + input_url
-            logger.info(f"Set current_github_repo_url to temporary processing state: '{st.session_state.current_github_repo_url}'")
+# Check if the URL needs processing
+current_loaded_url = st.session_state.get("current_github_repo_url")
+if current_loaded_url and current_loaded_url.startswith("PROCESSING_"):
+    # Extract the actual URL from the processing marker
+    active_github_url = current_loaded_url.replace("PROCESSING_", "").strip()
+    logger.info(f"Processing GitHub URL: {active_github_url}")
 
+    # Validate and parse the URL
+    match = re.match(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$", active_github_url)
+    if not match:
+        st.warning("Invalid GitHub URL format. Use: https://github.com/owner/repo")
+        clear_github_selection_state()
+        st.session_state.current_github_repo_url = None
+        logger.warning("Reset current_github_repo_url to None due to invalid URL.")
+    else:
+        # Process the valid URL (e.g., fetch branches)
+        owner, repo = match.groups()
+        logger.info(f"Valid URL parsed: owner={owner}, repo={repo}")
 
-        st.rerun() # Rerun to process the button click and state changes
+        # Fetch branches or perform necessary processing
+        try:
+            api_branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+            with st.spinner(f"Loading branches for {owner}/{repo}..."):
+                branches_res = requests.get(api_branches_url, timeout=10)
+                branches_res.raise_for_status()
+                branches_data = branches_res.json()
+                st.session_state.github_branches = [b["name"] for b in branches_data]
+            logger.info(f"Branch fetch successful. Found {len(st.session_state.github_branches)} branches.")
 
-    # --- GitHub URL Parsing & Branch Fetch ---
+            # Update the state to mark processing complete
+            st.session_state.current_github_repo_url = active_github_url
+            st.success(f"Repo '{owner}/{repo}' branches loaded.")
+        except Exception as e:
+            logger.error(f"Error processing GitHub URL: {e}")
+            st.error(f"Failed to process GitHub URL: {e}")
+            clear_github_selection_state()
+            st.session_state.current_github_repo_url = None    # --- GitHub URL Parsing & Branch Fetch ---
     # This logic runs on every rerun and is triggered when github_repo_url_input changes
     # and the Load/Process Repo button's logic sets current_github_repo_url to trigger it.
     active_github_url = st.session_state.get("github_repo_url_input", "").strip()
