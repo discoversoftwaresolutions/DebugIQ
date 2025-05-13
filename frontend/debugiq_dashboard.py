@@ -57,16 +57,17 @@ GEMINI_CHAT_URL = f"{BACKEND_URL}/gemini_chat"
 
 
 DEFAULT_VOICE_SAMPLE_RATE = 16000
-DEFAULT_VOICE_SAMPLE_WIDTH = 2 # Corrected space here
+DEFAULT_VOICE_SAMPLE_WIDTH = 2  # Corrected space here
 DEFAULT_VOICE_CHANNELS = 1  # Mono
 AUDIO_PROCESSING_THRESHOLD_SECONDS = 2
 
 TRACEBACK_EXTENSION = ".txt"
 SUPPORTED_SOURCE_EXTENSIONS = (
-    ".py", ".js", ".java", ".c", ".cpp", ".cs", ".go", ".rb", ".php",
-    ".html", ".css", ".md", ".ts", ".tsx", ".json", ".yaml", ".yml",
-    ".sh", ".R", ".swift", ".kt", ".scala"
+    ".py", ".js", ".java", ".c", ".cpp", ".cs", ".go", ".rb", ".php",
+    ".html", ".css", ".md", ".ts", ".tsx", ".json", ".yaml", ".yml",
+    ".sh", ".R", ".swift", ".kt", ".scala"
 )
+RECOGNIZED_FILE_EXTENSIONS = SUPPORTED_SOURCE_EXTENSIONS + (TRACEBACK_EXTENSION,))
 RECOGNIZED_FILE_EXTENSIONS = SUPPORTED_SOURCE_EXTENSIONS + (TRACEBACK_EXTENSION,)
 
 # === Helper Functions ===
