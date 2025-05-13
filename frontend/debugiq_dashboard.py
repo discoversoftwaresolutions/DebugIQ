@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # === Backend Constants ===
 # Use environment variable for the backend URL, with a fallback
-BACKEND_URL = os.getenv("BACKEND_URL", "http://debugiq-backend.railway.internal")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://debugiq-backend.railway.app")
 ENDPOINTS = {
     "suggest_patch": f"{BACKEND_URL}/debugiq/suggest_patch",
     "qa_validation": f"{BACKEND_URL}/qa/run_qa",
