@@ -20,4 +20,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 EXPOSE 10000
 
 # Start the app
-CMD ["streamlit", "run", "debugiq_dashboard_v2.py", "--server.port=10000", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "DebugIQ/frontend/debugiq_dashboard_v2.py", "--server.port=10000", "--server.address=0.0.0.0"]
