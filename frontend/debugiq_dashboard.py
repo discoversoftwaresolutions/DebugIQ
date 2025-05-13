@@ -22,18 +22,21 @@ logger = logging.getLogger(__name__)
 
 # === Backend Constants ===
 # Use environment variable for the backend URL, with a fallback
+
 BACKEND_URL = os.getenv("BACKEND_URL", "https://debugiq-backend.railway.app")
 ENDPOINTS = {
-    "suggest_patch": f"{BACKEND_URL}/debugiq/suggest_patch",
+    
+    
+    "suggest_patch": f"{BACKEND_URL}/debugiq/agent_suggest_patch",  # Updated path
     "qa_validation": f"{BACKEND_URL}/qa/run_qa",
     "doc_generation": f"{BACKEND_URL}/doc/generate_doc",
     "issues_inbox": f"{BACKEND_URL}/issues_inbox",
     "workflow_run": f"{BACKEND_URL}/workflow/run",
     "workflow_status": f"{BACKEND_URL}/workflow/status",
     "system_metrics": f"{BACKEND_URL}/system_metrics",
-    "voice_transcribe": f"{BACKEND_URL}/transcribe_audio", # Endpoint for audio transcription
-    "gemini_chat": f"{BACKEND_URL}/gemini_chat", # Endpoint for Gemini chat
-    "tts": f"{BACKEND_URL}/generate_tts", # Assuming a new TTS endpoint
+    "voice_transcribe": f"{BACKEND_URL}/transcribe_audio",
+    "gemini_chat": f"{BACKEND_URL}/gemini_chat",
+    "tts": f"{BACKEND_URL}/generate_tts"  # Ensure this matches the backend endpoint
 }
 
 # === Helper Functions ===
