@@ -416,7 +416,7 @@ on_change=lambda: (
             f"Branch selector changed to {st.session_state.github_selected_branch}. Resetting path stack."
         ) or st.session_state.update({"github_path_stack": [""]})  # Reset path on branch change
     ),
-)
+
 # Streamlit automatically updates st.session_state.github_selected_branch due to the key
 
 # --- File Browser Logic (if owner, repo, branch are set) ---
