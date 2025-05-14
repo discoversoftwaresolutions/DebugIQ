@@ -30,21 +30,21 @@ logger = logging.getLogger(__name__)
 BACKEND_URL = os.getenv("BACKEND_URL", "https://debugiq-backend.railway.app") # <-- Ensure this fallback is correct or use env var
 
 # Define API endpoint paths relative to BACKEND_URL
-ENDPOINTS = {
-    "suggest_patch": "/debugiq/suggest_patch",  # Correct path for analyze.py endpoint
-    "qa_validation": "/qa/run", # Based on /qa prefix and @router.post("/run")
-    "doc_generation": "/doc/generate", # Based on /doc prefix and @router.post("/generate")
-    "issues_inbox": "/issues/attention-needed", # Based on no prefix and @router.get("/issues/attention-needed")
-    "workflow_run": "/workflow/run_autonomous_workflow", # Based on /workflow prefix and @router.post("/run_autonomous_workflow")
-    # Workflow status needs issue_id formatting
-    "workflow_status": "/issues/{issue_id}/status", # Based on no prefix and @router.get("/issues/{issue_id}/status")
-    "system_metrics": "/metrics/status", # Based on no prefix and @router.get("/metrics/status")
-    # Paths for Voice/Gemini - CONFIRM THESE WITH YOUR BACKEND ROUTERS
-    "voice_transcribe": "/voice/transcribe", # Example path - CHECK YOUR BACKEND
-    "gemini_chat": "/gemini/chat", # Example path - CHECK YOUR BACKEND
-    "tts": "/voice/tts"  # Example path - CHECK YOUR BACKEND
-}
 
+ENDPOINTS = {
+    "suggest_patch": "/debugiq/suggest_patch",  # Correct path for analyze.py endpoint
+    "qa_validation": "/qa/run",  # Based on /qa prefix and @router.post("/run")
+    "doc_generation": "/doc/generate",  # Based on /doc prefix and @router.post("/generate")
+    "issues_inbox": "/issues/attention-needed",  # Based on no prefix and @router.get("/issues/attention-needed")
+    "workflow_run": "/workflow/run_autonomous_workflow",  # Based on /workflow prefix and @router.post("/run_autonomous_workflow")
+    # Workflow status needs issue_id formatting
+    "workflow_status": "/issues/{issue_id}/status",  # Based on no prefix and @router.get("/issues/{issue_id}/status")
+    "system_metrics": "/metrics/status",  # Based on no prefix and @router.get("/metrics/status")
+    # Paths for Voice/Gemini - CONFIRM THESE WITH YOUR BACKEND ROUTERS
+    "voice_transcribe": "/voice/transcribe",  # Example path - CHECK YOUR BACKEND
+    "gemini_chat": "/gemini/chat",  # Example path - CHECK YOUR BACKEND
+    "tts": "/voice/tts"  # Example path - CHECK YOUR BACKEND
+}
 
 # === Helper Functions ===
 # Modified make_api_request to construct the full URL from BACKEND_URL and path
