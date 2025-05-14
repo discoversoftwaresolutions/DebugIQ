@@ -20,6 +20,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Set default port for Streamlit
 EXPOSE 10000
 
-# Start the app
-# CORRECT THE CASING in the path argument to match the error message (lowercase debugiq)
-CMD ["streamlit", "run", "debugiq/frontend/debugiq_dashboard_v2.py", "--server.port=10000", "--server.address=0.0.0.0"] # <--- CORRECTED CASING
+
+CMD ["streamlit", "run", "frontend/debugiq_dashboard_v2.py", "--server.port=10000", "--server.address=0.0.0.0"] # <--- CORRECTED PATH
