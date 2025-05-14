@@ -31,11 +31,14 @@ logger = logging.getLogger(__name__)
 # Use environment variable for the backend URL, with a fallback.
 # Set BACKEND_URL environment variable in your deployment environment (e.g., Railway settings).
 # IMPORTANT: Replace with your actual backend URL if different from the fallback.
-BACKEND_URL=https://debugiq-backend-production.up.railway.app
+import os
+
+BACKEND_URL = os.getenv('BACKEND_URL', 'https://debugiq-backend-production.up.railway.app')
 
 # Define API endpoint paths relative to BACKEND_URL
 # IMPORTANT: These paths must exactly match your backend FastAPI/API endpoints
 # after considering router prefixes in main.py.
+
 ENDPOINTS = {
     "suggest_patch": "/debugiq/suggest_patch",  # analyze.py endpoint
     "qa_validation": "/qa/run",               # qa endpoint
