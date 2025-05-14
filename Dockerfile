@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy code
+# Copy code from the repository root into the container's /app directory
+# This copies with the original casing from your repository
 COPY . /app
 
 # Install Python dependencies
@@ -20,4 +21,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 EXPOSE 10000
 
 # Start the app
-CMD ["streamlit", "run", "DebugIQ/frontend/debugiq_dashboard_v2.py", "--server.port=10000", "--server.address=0.0.0.0"]
+# CORRECT THE CASING in the path argument to match the error message (lowercase debugiq)
+CMD ["streamlit", "run", "debugiq/frontend/debugiq_dashboard_v2.py", "--server.port=10000", "--server.address=0.0.0.0"] # <--- CORRECTED CASING
