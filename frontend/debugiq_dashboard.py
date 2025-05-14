@@ -32,8 +32,8 @@ BACKEND_URL = os.getenv("BACKEND_URL", "https://debugiq-backend.railway.app") # 
 
 # Define API endpoint paths relative to BACKEND_URL
 ENDPOINTS = {
-    "suggest_patch": "/debugiq/suggest_patch",  # Correct path for analyze.py endpoint
-    "qa_validation": "/qa/run", # Based on /qa prefix and @router.post("/run")
+    "suggest_patch": "/debugiq/suggest_patch",  # Correct path for analyze.py endpoint
+    "qa_validation": "/qa/run", # Based on /qa prefix and @router.post("/run")
     "doc_generation": "/doc/generate", # Based on /doc prefix and @router.post("/generate")
     "issues_inbox": "/issues/attention-needed", # Based on no prefix and @router.get("/issues/attention-needed")
     "workflow_run": "/workflow/run_autonomous_workflow", # Based on /workflow prefix and @router.post("/run_autonomous_workflow")
