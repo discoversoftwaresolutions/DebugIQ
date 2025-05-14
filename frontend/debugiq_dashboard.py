@@ -64,19 +64,19 @@ ENDPOINTS = {
     "tts": "/voice/tts"  # Example path - CHECK YOUR BACKEND
 }
 # Handle endpoints that require formatting (like workflow_status)
-    path_template = ENDPOINTS[endpoint_key]
+path_template = ENDPOINTS[endpoint_key]
 
-    # --- Construct the path ---
-    # This needs to be smarter if other endpoints require formatting.
-    # For now, handle workflow_status specifically.
-    if endpoint_key == "workflow_status":
-         issue_id = st.session_state.get("active_issue_id")
-         if not issue_id:
-              logger.error("Workflow status requested but no active_issue_id in session state.")
-              # Indicate that polling should stop if no issue_id
-              st.session_state.workflow_completed = True
-              return {"error": "No active issue ID to check workflow status."}
-         try:
+# --- Construct the path ---
+# This needs to be smarter if other endpoints require formatting.
+# For now, handle workflow_status specifically.
+if endpoint_key == "workflow_status":
+    issue_id = st.session_state.get("active_issue_id")
+    if not issue_id:
+        logger.error("Workflow status requested but no active_issue_id in session state.")
+        # Indicate that polling should stop if no issue_id
+        st.session_state.workflow_completed = True
+        return {"error": "No active issue ID to check workflow status."}
+        try:
             # Format the path using the issue_id
             path = path_template.format(issue_id=issue_id)
          except KeyError as e:
