@@ -1,4 +1,4 @@
-# File: frontend/debugiq_dashboard.py (Updated to match v2 logic)
+# File: frontend/debugiq_dashboard.py
 
 # DebugIQ Dashboard with Code Editor, Diff View, Autonomous Features, and Dedicated Voice Agent
 
@@ -9,16 +9,17 @@ import difflib
 from streamlit_ace import st_ace
 from streamlit_autorefresh import st_autorefresh
 
-# Updated imports for Voice Agent section (if you intend to keep that)
-# import av # Required for processing audio frames from streamlit-webrtc
-# import numpy as np # Required for processing audio frames
-# import io # Required for in-memory WAV file creation
-# import wave # Required for WAV file creation
-# from streamlit_webrtc import webrtc_streamer, WebRtcMode # Also needed if keeping voice
-# import logging # Already imported by requests, but good to be explicit
-# import base64 # Needed for voice/image encoding
-# import re # Needed for GitHub URL parsing
-# import threading # Potentially needed for thread-safe buffer if issues arise
+# Imports for Voice Agent section
+import av # Required for processing audio frames from streamlit-webrtc
+import numpy as np # Required for processing audio frames
+import io # Required for in-memory WAV file creation
+import wave # Required for WAV file creation
+from streamlit_webrtc import webrtc_streamer, WebRtcMode # Also needed if keeping voice
+import logging # Already imported by requests, but good to be explicit
+import base64 # Needed for voice/image encoding
+import re # Needed for GitHub URL parsing
+import threading # Potentially needed for thread-safe buffer if issues arise
+from urllib.parse import urljoin # Needed for constructing URLs robustly
 
 # === Logging Setup ===
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -30,21 +31,21 @@ logger = logging.getLogger(__name__)
 BACKEND_URL = os.getenv("BACKEND_URL", "https://debugiq-backend.railway.app") # <-- Ensure this fallback is correct or use env var
 
 # Define API endpoint paths relative to BACKEND_URL
-
 ENDPOINTS = {
-    "suggest_patch": "/debugiq/suggest_patch",  # Correct path for analyze.py endpoint
-    "qa_validation": "/qa/run",  # Based on /qa prefix and @router.post("/run")
-    "doc_generation": "/doc/generate",  # Based on /doc prefix and @router.post("/generate")
-    "issues_inbox": "/issues/attention-needed",  # Based on no prefix and @router.get("/issues/attention-needed")
-    "workflow_run": "/workflow/run_autonomous_workflow",  # Based on /workflow prefix and @router.post("/run_autonomous_workflow")
+    "suggest_patch": "/debugiq/suggest_patch",  # Correct path for analyze.py endpoint
+    "qa_validation": "/qa/run", # Based on /qa prefix and @router.post("/run")
+    "doc_generation": "/doc/generate", # Based on /doc prefix and @router.post("/generate")
+    "issues_inbox": "/issues/attention-needed", # Based on no prefix and @router.get("/issues/attention-needed")
+    "workflow_run": "/workflow/run_autonomous_workflow", # Based on /workflow prefix and @router.post("/run_autonomous_workflow")
     # Workflow status needs issue_id formatting
-    "workflow_status": "/issues/{issue_id}/status",  # Based on no prefix and @router.get("/issues/{issue_id}/status")
-    "system_metrics": "/metrics/status",  # Based on no prefix and @router.get("/metrics/status")
-    # Paths for Voice/Gemini - CONFIRM THESE WITH YOUR BACKEND ROUTERS
-    "voice_transcribe": "/voice/transcribe",  # Example path - CHECK YOUR BACKEND
-    "gemini_chat": "/gemini/chat",  # Example path - CHECK YOUR BACKEND
-    "tts": "/voice/tts"  # Example path - CHECK YOUR BACKEND
+    "workflow_status": "/issues/{issue_id}/status", # Based on no prefix and @router.get("/issues/{issue_id}/status")
+    "system_metrics": "/metrics/status", # Based on no prefix and @router.get("/metrics/status")
+    # Paths for Voice/Gemini - CONFIRM THESE WITH YOUR BACKEND ROUTERS
+    "voice_transcribe": "/voice/transcribe", # Example path - CHECK YOUR BACKEND
+    "gemini_chat": "/gemini/chat", # Example path - CHECK YOUR BACKEND
+    "tts": "/voice/tts"  # Example path - CHECK YOUR BACKEND
 }
+
 
 # === Helper Functions ===
 # Modified make_api_request to construct the full URL from BACKEND_URL and path
@@ -81,8 +82,6 @@ def make_api_request(method, endpoint_key, payload=None, return_json=True): # Ta
 
     # Construct the full URL by joining BACKEND_URL and the path
     # Use urljoin for robust joining, especially if BACKEND_URL might or might not end with /
-    # Requires 'from urllib.parse import urljoin'
-    from urllib.parse import urljoin # <--- ADD THIS IMPORT AT THE TOP
     url = urljoin(BACKEND_URL, path) # <--- CONSTRUCT THE FULL URL HERE
 
     try:
@@ -127,27 +126,120 @@ def make_api_request(method, endpoint_key, payload=None, return_json=True): # Ta
 
 # === Audio Processing Helper ===
 # Include frames_to_wav_bytes function here if keeping Voice Agent
+def frames_to_wav_bytes(frames):
+    """Converts a list of audio frames (av.AudioFrame) to WAV formatted bytes."""
+    if not frames:
+        return None
+
+    logger.info(f"Attempting to convert {len(frames)} audio frames to WAV.")
+
+    # Assume consistent format across frames
+    try:
+        frame_0 = frames[0]
+        sample_rate = frame_0.sample_rate
+        format_name = frame_0.format.name
+        channels = frame_0.layout.channels
+        sample_width_bytes = frame_0.format.bytes # Bytes per sample per channel
+        logger.info(f"Detected audio format: {format_name}, channels: {channels}, sample_rate: {sample_rate}, sample_width: {sample_width_bytes} bytes.")
+    except Exception as e:
+        logger.error(f"Error accessing frame properties: {e}")
+        return None
+
+    # Check for common formats and convert to raw bytes
+    # streamlit-webrtc typically provides s16, s32p, or f32p
+    # s16 is signed 16-bit int, interleaved
+    if 's16' in format_name and frame_0.layout.name in ['mono', 'stereo']:
+        try:
+            # For s16 interleaved, data is in the first plane. Concatenate raw bytes.
+            all_bytes = b"".join([frame.planes[0].buffer.tobytes() for frame in frames])
+            logger.info(f"Concatenated raw bytes from frames, total size: {len(all_bytes)} bytes.")
+            raw_data = all_bytes
+        except Exception as e:
+             logger.error(f"Error concatenating s16 audio frame bytes: {e}")
+             return None
+    elif 's32p' in format_name or 'f32p' in format_name:
+         # Planar formats: data for each channel is in a separate plane. Need to interleave.
+         try:
+             # Convert planes to numpy arrays and interleave
+             all_channels_data = [np.concatenate([frame.planes[i].to_ndarray() for frame in frames]) for i in range(channels)]
+             # Stack channel data (e.g., [samples_ch1], [samples_ch2]) -> [[s1_ch1, s1_ch2], [s2_ch1, s2_ch2], ...]
+             interleaved_data = np.stack(all_channels_data, axis=-1)
+             raw_data = interleaved_data.tobytes()
+             logger.info(f"Interleaved planar data, resulting in {len(raw_data)} bytes.")
+         except Exception as e:
+             logger.error(f"Error processing planar audio frames: {e}")
+             return None
+    else:
+        logger.error(f"Unsupported audio format or layout for WAV conversion: {format_name}, {frame_0.layout.name}. Support for s16, s32p, f32p (mono/stereo) implemented.")
+        return None
+
+
+    # Create a WAV file in memory
+    try:
+        with io.BytesIO() as wav_buffer:
+            with wave.open(wav_buffer, 'wb') as wf:
+                wf.setnchannels(channels)
+                wf.setsampwidth(sample_width_bytes)
+                wf.setframerate(sample_rate)
+                wf.writeframes(raw_data)
+            wav_bytes = wav_buffer.getvalue()
+            logger.info(f"Successfully created WAV data of size {len(wav_bytes)} bytes.")
+            return wav_bytes
+    except Exception as e:
+        logger.error(f"Error creating WAV file: {e}")
+        return None
 
 # === WebRTC Audio Frame Callback ===
-# Include audio_frame_callback here if keeping Voice Agent
+# Moved this function definition to the top level to ensure it's defined before use
+def audio_frame_callback(frame: av.AudioFrame):
+    """Callback function to receive and process audio frames from the browser."""
+    # Use a thread-safe buffer to handle audio frames received in a different thread
+    if "audio_buffer" not in st.session_state:
+        st.session_state.audio_buffer = []
+
+    # Lock to ensure thread-safe access to session state from the callback thread
+    if "audio_buffer_lock" not in st.session_state:
+        st.session_state.audio_buffer_lock = threading.Lock()
+
+    with st.session_state.audio_buffer_lock:
+        if st.session_state.get('is_recording', False):
+            # Append the audio frame to the session state's buffer
+            st.session_state.audio_buffer.append(frame)
+
+            # Store format info from the first frame if not already stored and buffer is not empty
+            if 'audio_format' not in st.session_state and st.session_state.audio_buffer:
+                frame_0 = st.session_state.audio_buffer[0]
+                st.session_state.audio_format = {
+                    'sample_rate': frame_0.sample_rate,
+                    'format_name': frame_0.format.name,
+                    'channels': frame_0.layout.channels,
+                    'sample_width_bytes': frame_0.format.bytes
+                }
+
+            # Log the audio frame details for debugging purposes (optional, can be chatty)
+            # print(f"Audio frame received: {len(st.session_state.audio_buffer)} frames buffered.")
+
 
 # === Main Application ===
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ ")
 
-# Initialize session state for recording and chat history (if keeping Voice Agent)
+# Initialize session state for recording and chat history
 if 'is_recording' not in st.session_state:
     st.session_state.is_recording = False
 if 'audio_buffer' not in st.session_state:
     st.session_state.audio_buffer = []
+if 'audio_buffer_lock' not in st.session_state:
+    st.session_state.audio_buffer_lock = threading.Lock() # Initialize the lock
 if 'recording_status' not in st.session_state:
     st.session_state.recording_status = "Idle"
 if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+    st.session_state.chat_history = [] # Store list of {"role": "user" or "ai", "content": "...", "audio": b"..."}
+# No longer need last_audio_response as audio is stored in chat_history
 
 # === Sidebar for GitHub Integration ===
 st.sidebar.header("📦 GitHub Integration")
-github_url = st.sidebar.text_input("GitHub Repository URL", placeholder="https://github.com/owner/repo")
+github_url = st.sidebar.text_input("GitHub Repository URL", placeholder="https://github.com/owner/repo", key="sidebar_github_url")
 if github_url:
     match = re.match(r"https://github\.com/([^/]+)/([^/]+)", github_url)
     if match:
@@ -159,15 +251,15 @@ if github_url:
 # === Application Tabs ===
 # Removed Voice Agent tab as it's now a dedicated section
 # Ensure tab count and names match your desired UI
-tabs = st.tabs(["📄 Traceback + Patch", "✅ QA Validation", "📘 Documentation", "📣 Issues", "🤖 Workflow", "🔍 Workflow Check", "📈 Metrics"])
+tabs = st.tabs(["📄 Traceback + Patch", "✅ QA Validation", "📘 Documentation", "📣 Issues", "🤖 Workflow", "🔍 Workflow Status", "📈 Metrics"])
 # Assign tabs to variables based on their index
-tab_trace, tab_qa, tab_doc, tab_issues, tab_workflow, tab_status, tab_metrics = tabs # Corrected variable names to match tab count
+tab_trace, tab_qa, tab_doc, tab_issues, tab_workflow, tab_status, tab_metrics = tabs
 
 # === Traceback + Patch Tab ===
 with tab_trace:
     st.header("📄 Traceback & Patch Analysis")
     # Updated file uploader types based on backend model
-    uploaded_file = st.file_uploader("Upload Traceback or Source Files", type=["txt", "py", "java", "js", "cpp", "c"])
+    uploaded_file = st.file_uploader("Upload Traceback or Source Files", type=["txt", "py", "java", "js", "cpp", "c"], key="trace_file_uploader")
 
     if uploaded_file:
         file_content = uploaded_file.read().decode("utf-8")
@@ -177,7 +269,7 @@ with tab_trace:
         original_language = uploaded_file.type.split('/')[-1] if uploaded_file.type in ["py", "java", "js", "cpp", "c"] else "plaintext"
         st.code(file_content, language=original_language, height=300)
 
-        if st.button("🔬 Analyze & Suggest Patch"):
+        if st.button("🔬 Analyze & Suggest Patch", key="analyze_patch_btn"):
             with st.spinner("Analyzing and suggesting patch..."):
                 # Corrected Payload to match backend AnalyzeRequest model
                 # Requires 'code', 'language', (optional 'context')
@@ -239,16 +331,16 @@ with tab_trace:
 with tab_qa:
     st.header("✅ QA Validation")
     st.write("Upload a patch file to run QA validation checks.")
-    uploaded_patch = st.file_uploader("Upload Patch File", type=["txt", "diff", "patch"]) # Added diff/patch types
+    uploaded_patch = st.file_uploader("Upload Patch File", type=["txt", "diff", "patch"], key="qa_patch_uploader")
 
     if uploaded_patch:
         patch_content = uploaded_patch.read().decode("utf-8")
         st.subheader("Patch Content")
         st.code(patch_content, language="diff", height=200)
 
-        if st.button("🛡️ Validate Patch"):
-            if uploaded_patch:
-                with st.spinner("Running QA validation..."):
+    if st.button("🛡️ Validate Patch", key="qa_validate_btn"):
+        if uploaded_patch:
+            with st.spinner("Running QA validation..."):
                     # Check your backend's expected payload for /qa/run
                     payload = {"patch_diff": patch_content} # Assuming backend expects 'patch_diff'
                     response = make_api_request("POST", "qa_validation", payload) # <--- Use endpoint key
@@ -268,7 +360,7 @@ with tab_qa:
 with tab_doc:
     st.header("📘 Documentation Generation")
     st.write("Upload a code file to generate documentation automatically.")
-    uploaded_code = st.file_uploader("Upload Code File for Documentation", type=["txt", "py", "java", "js", "cpp", "c"])
+    uploaded_code = st.file_uploader("Upload Code File for Documentation", type=["txt", "py", "java", "js", "cpp", "c"], key="doc_code_uploader")
 
     if uploaded_code:
         code_content = uploaded_code.read().decode("utf-8")
@@ -276,7 +368,7 @@ with tab_doc:
         doc_language = uploaded_code.type.split('/')[-1] if uploaded_code.type in ["py", "java", "js", "cpp", "c"] else "plaintext"
         st.code(code_content, language=doc_language, height=200)
 
-    if st.button("📝 Generate Documentation"):
+    if st.button("📝 Generate Documentation", key="doc_generate_btn"):
         if uploaded_code:
             with st.spinner("Generating documentation..."):
                 # Check your backend's expected payload for /doc/generate
@@ -299,7 +391,7 @@ with tab_issues:
     st.header("📣 Issues Inbox")
     st.write("This section lists issues needing attention from the autonomous workflow.")
 
-    if st.button("🔄 Refresh Issues"):
+    if st.button("🔄 Refresh Issues", key="issues_refresh_btn"):
         with st.spinner("Fetching issues..."):
             response = make_api_request("GET", "issues_inbox") # <--- Use endpoint key
 
@@ -325,7 +417,7 @@ with tab_workflow:
     st.write("Trigger an autonomous workflow run for a specific issue.")
     issue_id = st.text_input("Issue ID to Trigger Workflow", placeholder="e.g., BUG-123", key="workflow_trigger_issue_id")
 
-    if st.button("▶️ Trigger Workflow"):
+    if st.button("▶️ Trigger Workflow", key="workflow_trigger_btn"):
         if issue_id:
             with st.spinner(f"Triggering workflow for issue {issue_id}..."):
                 # Check backend payload for /workflow/run_autonomous_workflow
@@ -385,11 +477,16 @@ with tab_status: # This is now the status/polling tab
 
     def show_agent_progress(status):
         step = progress_map.get(status, 0)
-        st.progress((step + 1) / len(progress_labels))
-        for i, label in enumerate(progress_labels):
-            # Adjust icon logic: success up to current step, spinner for current, empty for future
-            icon = "✅" if i <= step and status != failed_status else ("🔄" if i == step and status != failed_status else "⏳")
-            st.markdown(f"{icon} {label}")
+        # Adjust icon logic: success up to current step, spinner for current, empty for future
+        if status == failed_status:
+            icon = "❌"
+            st.markdown(f"{icon} Workflow Failed")
+        else:
+            st.progress((step + 1) / len(progress_labels))
+            for i, label in enumerate(progress_labels):
+                 icon = "✅" if i <= step else ("🔄" if i == step + 1 else "⏳") # Spinner for the *next* step
+                 st.markdown(f"{icon} {label}")
+
 
     # Polling logic (autorefresh only if an issue is active and workflow not complete)
     if st.session_state.active_issue_id and not st.session_state.workflow_completed:
@@ -400,7 +497,7 @@ with tab_status: # This is now the status/polling tab
 
     # --- Fetch and Display Status ---
     # This code runs on every rerun, including those triggered by autorefresh
-    if st.session_state.active_issue_id:
+    if st.session_state.active_issue_id and not st.session_state.workflow_completed: # Only fetch if active and not completed yet
         try:
             # Use make_api_request with the endpoint key - special handling in make_api_request for formatting
             status_response = make_api_request("GET", "workflow_status") # <--- Use endpoint key
@@ -410,7 +507,7 @@ with tab_status: # This is now the status/polling tab
                 current_status = status_response.get("status", "Unknown")
                 error_message = status_response.get("error_message")
 
-                st.session_state.last_status = current_status
+                st.session_state.last_status = current_status # Store last status
                 st.info(f"🔁 Live Status: **{current_status}**")
 
                 if error_message:
@@ -433,11 +530,25 @@ with tab_status: # This is now the status/polling tab
                 # Stop polling on API errors
                 st.session_state.workflow_completed = True
 
-    else:
-        # Display idle status if no issue ID is active
-        st.info("Enter an Issue ID or trigger a workflow to see status.")
-        # Ensure polling is off if no active ID
-        st.session_state.workflow_completed = True
+    else: # Display idle status if no issue ID is active or if workflow is completed
+        if st.session_state.last_status: # Show final status if completed
+             if st.session_state.last_status == terminal_status:
+                 st.success("✅ Workflow completed.")
+             elif st.session_state.last_status == failed_status:
+                 st.error("❌ Workflow failed.")
+                 # Display last known error message if available
+                 if "error_message" in st.session_state:
+                     st.error(f"Last recorded error: {st.session_state.error_message}")
+             else: # Handle other non-polling terminal states
+                 st.info(f"Workflow finished with status: **{st.session_state.last_status}**")
+             # Optionally show final progress state
+             show_agent_progress(st.session_state.last_status)
+
+        else: # No active issue and no last status
+            st.info("Enter an Issue ID or trigger a workflow to see status.")
+
+        # Ensure polling is off if no active ID or workflow is completed
+        st.session_state.workflow_completed = True # Explicitly set completed if no active ID
 
 
 # === Metrics Tab ===
@@ -445,7 +556,7 @@ with tab_metrics:
     st.header("📈 System Metrics")
     st.write("View system and performance metrics for the DebugIQ backend.")
 
-    if st.button("📊 Fetch Metrics"):
+    if st.button("📊 Fetch Metrics", key="metrics_fetch_btn"):
         with st.spinner("Fetching system metrics..."):
             response = make_api_request("GET", "system_metrics") # <--- Use endpoint key
 
@@ -473,3 +584,104 @@ with tab_metrics:
 st.markdown("---")
 st.subheader("Voice Agent (Placeholder)")
 st.write("Voice agent code goes here.")
+
+# Example Placeholder for WebRTC Streamer component - needed for the callback to fire
+# if st.session_state.get('is_recording', False) or True: # Ensure it renders when recording or always if needed
+#     try:
+#         ctx = webrtc_streamer(
+#             key="voice_agent_streamer_bottom",  # Unique key
+#             mode=WebRtcMode.SENDONLY,  # Send audio from browser to server
+#             frontend_rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+#             media_stream_constraints={"audio": True, "video": False},
+#             audio_frame_callback=audio_frame_callback, # Make sure this callback is defined above
+#         )
+#         # Handle potential issues with ctx.state.playing if needed
+#         # if ctx.state.playing and not st.session_state.get('webrtc_started', False):
+#         #     st.session_state.webrtc_started = True
+#         #     logger.info("WebRTC streamer started playing.")
+
+#     except Exception as e:
+#         st.error(f"Failed to initialize voice agent microphone: {e}")
+#         logger.exception("Error initializing webrtc_streamer for Voice Agent")
+
+
+# Add a simple text input as an alternative way to chat if mic is not preferred
+st.markdown("---") # Separator before text input
+text_query = st.text_input("Type your query here:", key="text_chat_input")
+send_text_button = st.button("Send Text Query", key="send_text_btn")
+
+if send_text_button and text_query:
+    # Use make_api_request for the text query to the backend Gemini Chat endpoint
+    st.session_state.recording_status = "Processing Text Query..."
+    status_placeholder.info(f"Status: {st.session_state.recording_status}")
+
+    user_text = text_query
+    # Add user's text to chat history immediately
+    st.session_state.chat_history.append({"role": "user", "content": user_text})
+
+
+    # --- Send text query to Gemini Chat ---
+    ai_response_text = ""
+    ai_response_audio = None # To store TTS audio bytes
+
+    st.session_state.recording_status = "Sending to Gemini..."
+    status_placeholder.info(f"Status: {st.session_state.recording_status}")
+    with st.spinner("Getting response from Gemini..."):
+        # Send the text query to Gemini. Backend interprets.
+        gemini_payload = {"text": user_text}
+        # Use make_api_request with the endpoint key
+        gemini_response = make_api_request("POST", "gemini_chat", gemini_payload) # <--- Use endpoint key
+
+
+    if "error" not in gemini_response:
+        ai_response_text = gemini_response.get("response", "No response from Gemini.")
+        st.session_state.recording_status = "Gemini Response Received."
+
+        # --- Generate TTS for AI response ---
+        if ai_response_text:
+             st.session_state.recording_status = "Generating Speech..."
+             status_placeholder.info(f"Status: {st.session_state.recording_status}")
+             with st.spinner("Generating AI speech..."):
+                 tts_payload = {"text": ai_response_text}
+                 # Request raw audio bytes (return_json=False)
+                 tts_response_data = make_api_request("POST", "tts", tts_payload, return_json=False) # <--- Use endpoint key
+
+
+             if not isinstance(tts_response_data, dict) or "error" not in tts_response_data:
+                 # Assuming tts_response_data is the raw WAV bytes
+                 ai_response_audio = tts_response_data
+                 st.session_state.recording_status = "Speech Generated."
+                 logger.info(f"Received TTS audio bytes, size: {len(ai_response_audio) if ai_response_audio else 0}")
+             else:
+                 ai_response_text += f"\n(TTS Error: {tts_response_data.get('error', 'Unknown TTS error')})"
+                 st.session_state.recording_status = "TTS Error."
+
+        else:
+             st.session_state.recording_status = "No AI text response for speech."
+
+    else:
+        ai_response_text = f"Error from Gemini: {gemini_response['error']}"
+        st.session_state.recording_status = "Gemini Error."
+
+
+    # Add AI's response (text and potentially audio) to chat history
+    if ai_response_text or ai_response_audio:
+        # For text input, we don't have captured audio format info. Default sample rate is usually ok for st.audio.
+        st.session_state.chat_history.append({"role": "ai", "content": ai_response_text, "audio": ai_response_audio})
+
+
+    status_placeholder.info(f"Status: {st.session_state.recording_status}")
+
+    # Clear the text input after sending
+    st.session_state.text_chat_input = "" # Use the session state key
+    # Trigger a rerun to update the chat history display (only if text input was used)
+    st.rerun() # Rerun will happen anyway if button is pressed, but explicit for clarity
+
+
+# === Debugging/Development Info (Optional) ===
+# st.sidebar.markdown("---")
+# st.sidebar.subheader("Debugging Info")
+# st.sidebar.write(f"Backend URL: {BACKEND_URL}")
+# st.sidebar.write(f"Active Issue ID: {st.session_state.get('active_issue_id', 'None')}")
+# st.sidebar.write(f"Workflow Completed: {st.session_state.get('workflow_completed', 'False')}")
+# st.sidebar.json(st.session_state)
