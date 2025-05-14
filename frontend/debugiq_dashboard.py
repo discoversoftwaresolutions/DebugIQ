@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 BACKEND_URL = os.getenv("BACKEND_URL", "https://debugiq-backend.railway.app")
 
 # Define API endpoint paths relative to BACKEND_URL
-# IMPORTANT: These paths must exactly match your backend FastAPI/API endpoints.
+# IMPORTANT: These paths must exactly match your backend FastAPI/API endpoints
+# after considering router prefixes in main.py.
 ENDPOINTS = {
     "suggest_patch": "/debugiq/suggest_patch",  # analyze.py endpoint
     "qa_validation": "/qa/run",               # qa endpoint
@@ -46,7 +47,7 @@ ENDPOINTS = {
     # Paths for Voice/Gemini - CONFIRM THESE WITH YOUR BACKEND ROUTERS
     "voice_transcribe": "/voice/transcribe",  # Example path - CHECK YOUR BACKEND
     "gemini_chat": "/gemini/chat",            # Example path - CHECK YOUR BACKEND
-    "tts": "/voice/tts"                     # Example path - CHECK YOUR BACKEND
+    "tts": "/voice/tts"                     # Example path - CHECK YOUR BACKEND (if used separately)
 }
 
 # === Session State Initialization ===
@@ -101,7 +102,7 @@ def make_api_request(method, endpoint_key, payload=None, return_json=True):
     """
     # Ensure endpoint_key exists in ENDPOINTS
     if endpoint_key not in ENDPOINTS:
-        logger.error(f"Invalid endpoint key: {endpoint_key}")
+        logger.error(f"Frontend configuration error: Invalid endpoint key '{endpoint_key}'.")
         return {"error": f"Frontend configuration error: Invalid endpoint key '{endpoint_key}'."}
 
     path_template = ENDPOINTS[endpoint_key]
@@ -111,17 +112,17 @@ def make_api_request(method, endpoint_key, payload=None, return_json=True):
     if endpoint_key == "workflow_status":
         issue_id = st.session_state.get("active_issue_id")
         if not issue_id:
-            logger.error("Workflow status requested but no active_issue_id in session state.")
             # Indicate that polling should stop if no issue_id
             st.session_state.workflow_completed = True
             # Return a specific error message indicating the missing ID
+            logger.warning("Workflow status requested but no active_issue_id in session state.")
             return {"error": "No active issue ID to check workflow status. Please trigger a workflow or enter an ID."}
         try:
             # Format the path using the issue_id from session state
             path = path_template.format(issue_id=issue_id)
         except KeyError as e:
             # Should not happen if logic sets active_issue_id correctly, but included for robustness
-            logger.error(f"Failed to format workflow_status path: Missing key {e}")
+            logger.error(f"Failed to format workflow_status path: Missing key {e}", exc_info=True)
             st.session_state.workflow_completed = True # Stop polling on formatting error
             return {"error": f"Internal error formatting workflow status URL: Missing issue ID key ({e})."}
 
@@ -139,9 +140,14 @@ def make_api_request(method, endpoint_key, payload=None, return_json=True):
         if return_json:
             # Attempt to parse JSON response
             try:
-                return response.json()
+                # Handle empty response bodies or non-JSON responses gracefully
+                if response.text:
+                    return response.json()
+                else:
+                    logger.warning(f"API request to {url} returned empty response body.")
+                    return {} # Return empty dict for empty successful JSON response
             except json.JSONDecodeError:
-                logger.error(f"Failed to decode JSON response from {url}. Response text: {response.text}")
+                logger.error(f"Failed to decode JSON response from {url}. Response text: {response.text[:500]}...") # Log snippet
                 return {"error": f"Backend response is not valid JSON.", "raw_response": response.text}
         else:
             return response.content # Return raw content for binary data like audio
@@ -150,28 +156,36 @@ def make_api_request(method, endpoint_key, payload=None, return_json=True):
         logger.error(f"API request timed out: {method} {url}")
         return {"error": "API request timed out. The backend might be slow or unresponsive."}
     except requests.exceptions.ConnectionError:
-        logger.error(f"API connection error: {method} {url}")
+        logger.error(f"API connection error: {method} {url}", exc_info=True) # Log connection error with traceback
         return {"error": "Could not connect to the backend API. Please check the backend URL and status."}
     except requests.exceptions.RequestException as e:
-        logger.error(f"API request failed: {e}")
+        # Catch all other requests.exceptions.RequestException (HTTP errors, etc.)
+        logger.error(f"API request failed: {e}", exc_info=True) # Log error with traceback
         # Try to include backend error detail if available from the response
         detail = str(e) # Default detail is the exception message
         backend_detail = "N/A"
         if e.response is not None:
             detail = f"Status {e.response.status_code}"
             try:
-                # Attempt to parse JSON detail from backend response body
-                backend_json = e.response.json()
-                # Prioritize 'detail' key from FastAPI, fallback to the whole JSON object
-                backend_detail = backend_json.get('detail', backend_json)
-                detail = f"Status {e.response.status_code} - {backend_detail}" # More informative error
+                # Attempt to parse JSON detail from backend response body (FastAPI often returns {"detail": ...})
+                if e.response.text:
+                    backend_json = e.response.json()
+                    # Prioritize 'detail' key from FastAPI, fallback to the whole JSON object
+                    backend_detail = backend_json.get('detail', backend_json)
+                    detail = f"Status {e.response.status_code} - {backend_detail}" # More informative error
+                else:
+                    backend_detail = "Empty response body"
+                    detail = f"Status {e.response.status_code} - Empty response body"
             except json.JSONDecodeError:
                 # If response is not JSON, include raw text response body
                 backend_detail = e.response.text
-                detail = f"Status {e.response.status_code} - Response Text: {backend_detail}"
+                detail = f"Status {e.response.status_code} - Response Text: {backend_detail[:500]}..." # Log snippet
             except Exception as json_e:
                 # Catch any other errors during response parsing
-                logger.warning(f"Could not parse backend error response: {json_e}")
+                logger.warning(f"Could not parse backend error response: {json_e}", exc_info=True)
+                backend_detail = e.response.text or "N/A"
+                detail = f"Status {e.response.status_code} - Could not parse response."
+
 
         return {"error": f"API request failed: {detail}", "backend_detail": backend_detail}
 
@@ -183,22 +197,21 @@ def frames_to_wav_bytes(frames):
         return None
 
     # Use audio format information stored in session state from the first frame received
-    audio_format = st.session_state.get('audio_format')
-    if not audio_format:
-        logger.error("Audio format information not found in session state. Cannot convert to WAV.")
+    # Use a try-except block in case audio_format is missing or incomplete
+    try:
+        audio_format = st.session_state['audio_format']
+        sample_rate = audio_format['sample_rate']
+        format_name = audio_format['format_name']
+        channels = audio_format['channels']
+        sample_width_bytes = audio_format['sample_width_bytes']
+        layout_name = audio_format.get('layout_name', 'Unknown Layout') # Use get for safety
+    except KeyError as e:
+        logger.error(f"Missing audio format information in session state: {e}. Cannot convert to WAV.")
         return None
-
-    # Extract format details from the stored dictionary
-    sample_rate = audio_format.get('sample_rate')
-    format_name = audio_format.get('format_name')
-    channels = audio_format.get('channels')
-    sample_width_bytes = audio_format.get('sample_width_bytes')
-    layout_name = audio_format.get('layout_name', 'Unknown Layout')
-
-    # Basic validation of format details
-    if not all([sample_rate, format_name, channels, sample_width_bytes]):
-         logger.error(f"Missing essential audio format information: {audio_format}")
+    except Exception as e:
+         logger.error(f"Error accessing audio format from session state: {e}", exc_info=True)
          return None
+
 
     logger.info(f"Converting {len(frames)} audio frames to WAV. Format: {format_name}, Channels: {channels}, Sample Rate: {sample_rate}, Sample Width: {sample_width_bytes} bytes, Layout: {layout_name}.")
 
@@ -207,25 +220,34 @@ def frames_to_wav_bytes(frames):
         # Handle common interleaved format (s16)
         if 's16' in format_name and layout_name.lower() in ['mono', 'stereo']:
             # For s16 interleaved, data for all channels is in the first plane (index 0).
-            raw_data = b"".join([frame.planes[0].buffer.tobytes() for frame in frames])
+            # Ensure planes[0].buffer exists before tobytes()
+            raw_data = b"".join([frame.planes[0].buffer.tobytes() for frame in frames if frame.planes and frame.planes[0].buffer])
             logger.info(f"Concatenated raw bytes from s16 frames, total size: {len(raw_data)} bytes.")
         # Handle common planar formats (s32p, f32p)
         elif 's32p' in format_name or 'f32p' in format_name:
             # Planar formats: data for each channel is in a separate plane (plane[i] for channel i).
             # Need to concatenate data for each channel across all frames, then interleave.
             logger.info(f"Processing planar audio format: {format_name}")
-            all_channels_data = [np.concatenate([frame.planes[i].to_ndarray() for frame in frames]) for i in range(channels)]
+            all_channels_data = []
+            for i in range(channels):
+                 # Concatenate data for each channel across all frames
+                 channel_data = np.concatenate([frame.planes[i].to_ndarray() for frame in frames if frame.planes and len(frame.planes) > i])
+                 all_channels_data.append(channel_data)
+
+            if not all_channels_data:
+                 logger.warning("No channel data extracted from planar frames.")
+                 return None
+
             # Stack channel data (e.g., [samples_ch1], [samples_ch2]) -> [[s1_ch1, s1_ch2], [s2_ch1, s2_ch2], ...]
-            # Then convert the stacked NumPy array to bytes.
             interleaved_data = np.stack(all_channels_data, axis=-1)
-            raw_data = interleaved_data.tobytes()
+            raw_data = interleaved_data.tobytes() # Convert the stacked NumPy array to bytes.
             logger.info(f"Interleaved planar data, resulting in {len(raw_data)} bytes.")
         else:
             # Log unsupported formats
-            logger.error(f"Unsupported audio format or layout for WAV conversion: {format_name}, {layout_name}. Support for s16, s32p, f32p (mono/stereo) implemented.")
+            logger.error(f"Unsupported audio format or layout for WAV conversion: {format_name}, {layout_name}. Supported: s16, s32p, f32p (mono/stereo).")
             return None
     except Exception as e:
-        logger.error(f"Error processing audio frame bytes for conversion: {e}")
+        logger.error(f"Error processing audio frame bytes for conversion: {e}", exc_info=True)
         return None
 
     # Ensure raw_data is not empty before attempting WAV creation
@@ -246,7 +268,7 @@ def frames_to_wav_bytes(frames):
             logger.info(f"Successfully created WAV data of size {len(wav_bytes)} bytes.")
             return wav_bytes
     except Exception as e:
-        logger.error(f"Error creating WAV file in memory: {e}")
+        logger.error(f"Error creating WAV file in memory: {e}", exc_info=True)
         return None
 
 # === WebRTC Audio Frame Callback ===
@@ -281,10 +303,9 @@ def audio_frame_callback(frame: av.AudioFrame):
 st.set_page_config(page_title="DebugIQ Dashboard", layout="wide")
 st.title("🧠 DebugIQ ")
 
-# A general placeholder at the top for potential future use,
-# but workflow status and voice status will use dedicated placeholders in their tabs.
-# Kept here in case a global status message is ever needed.
-# status_placeholder_global = st.empty() # Commented out to avoid confusion
+# A general placeholder at the top. Can be used for global messages if needed,
+# but tab-specific status updates use placeholders defined within their tabs.
+# status_placeholder_global = st.empty()
 
 # === Sidebar for GitHub Integration ===
 st.sidebar.header("📦 GitHub Integration")
@@ -368,6 +389,7 @@ with tab_trace:
         if file_content_trace: # Double-check content exists
             with st.spinner("Analyzing and suggesting patch..."):
                 # Construct payload based on backend's AnalyzeRequest model
+                # Ensure endpoint key matches ENDPOINTS
                 payload = {
                     "code": file_content_trace,
                     "language": original_language_trace, # Use detected language
@@ -386,7 +408,7 @@ with tab_trace:
                 st.code(suggested_diff, language="diff", height=300)
                 st.markdown(f"💡 **Explanation:** {explanation}")
 
-                # Code Editor for Editing Patch - Initialize with ORIGINAL content for editing
+                # Code Editor for Editing Content - Initialize with ORIGINAL content for editing
                 st.markdown("### ✍️ Edit Content")
                 edited_content = st_ace(
                     value=file_content_trace, # Start with the original file content
@@ -451,6 +473,7 @@ with tab_qa:
         if patch_content: # Double-check content exists
             with st.spinner("Running QA validation..."):
                 # Construct payload - Assuming backend expects 'patch_diff' key with the patch content
+                # Ensure endpoint key matches ENDPOINTS
                 payload = {"patch_diff": patch_content}
                 # Call the backend API using the helper function
                 response = make_api_request("POST", "qa_validation", payload)
@@ -496,13 +519,14 @@ with tab_doc:
         if code_content_doc: # Double-check content exists
             with st.spinner("Generating documentation..."):
                 # Construct payload - Assuming backend needs 'code' and 'language' keys
+                # Ensure endpoint key matches ENDPOINTS
                 payload = {"code": code_content_doc, "language": doc_language}
                 # Call the backend API using the helper function
                 response = make_api_request("POST", "doc_generation", payload)
 
             if "error" not in response:
-                # Assuming the response contains a "documentation" key with markdown or text
                 st.subheader("Generated Documentation")
+                # Assuming the response contains a "documentation" key with markdown or text
                 st.markdown(response.get("documentation", "No documentation generated."))
             else:
                 # Display error from make_api_request helper
@@ -510,7 +534,6 @@ with tab_doc:
                 if "backend_detail" in response: st.json({"Backend Detail": response["backend_detail"]})
         else:
              st.warning("Please upload a code file to generate documentation.")
-
 
 # === Issues Tab ===
 with tab_issues:
@@ -521,6 +544,7 @@ with tab_issues:
     if st.button("🔄 Refresh Issues", key="issues_refresh_btn"):
         with st.spinner("Fetching issues..."):
             # Call the backend API using the helper function (GET request, no payload)
+            # Ensure endpoint key matches ENDPOINTS
             response = make_api_request("GET", "issues_inbox")
 
         if "error" not in response:
@@ -572,6 +596,7 @@ with tab_workflow_trigger:
         if issue_id_trigger_value: # Double-check value exists
             with st.spinner(f"Triggering workflow for issue **{issue_id_trigger_value}**..."):
                 # Construct payload - Assuming backend expects 'issue_id' key
+                # Ensure endpoint key matches ENDPOINTS
                 payload = {"issue_id": issue_id_trigger_value}
                 # Call the backend API using the helper function
                 response = make_api_request("POST", "workflow_run", payload)
@@ -587,8 +612,9 @@ with tab_workflow_trigger:
                 st.session_state.last_status = None # Clear last status
                 st.session_state.error_message = None # Clear last error message
 
-                # Rerun the app to immediately switch to or update the Status tab
-                st.rerun()
+                # Rerun the app to immediately switch to or update the Status tab (optional, can manually switch)
+                # st.rerun() # Commented out to avoid automatic tab switching
+
             else:
                 # Display error from make_api_request helper
                 st.error(response["error"])
@@ -641,7 +667,7 @@ with tab_status:
         "📦 PR Created" # Example status name - ADJUST BASED ON BACKEND
     ]
     # Map backend status strings to progress steps (0-indexed).
-    # !!! IMPORTANT: These strings MUST exactly match the statuses returned by your backend !!!
+    # !!! IMPORTANT: These strings MUST exactly match the statuses returned by your backend's status endpoint !!!
     progress_map = {
         "Seeded": 0, # Assuming Seeded is initial status from backend
         "Fetching Details": 0,
@@ -654,7 +680,7 @@ with tab_status:
         "PR Creation in Progress": 5,
         "PR Created - Awaiting Review/QA": 5 # Final success status
     }
-    # Define terminal status strings
+    # Define terminal status strings - MUST match backend statuses
     terminal_status_success = "PR Created - Awaiting Review/QA" # Final successful state
     terminal_status_failed = "Workflow Failed" # Final failed state
 
@@ -667,7 +693,7 @@ with tab_status:
         # Calculate progress value for the progress bar (0 to 1)
         # Handle the case where status is failed or not recognized gracefully
         if status == terminal_status_failed or step == -1:
-            progress_value = 0 # Or a small value to indicate start
+            progress_value = 0 # Or a small value to indicate start/unknown
         else:
             # Progress goes from 0 (before step 0) to 1 (at or after the last step)
             progress_value = min(step + 1, len(progress_labels)) / len(progress_labels)
@@ -679,7 +705,8 @@ with tab_status:
             icon = "⏳" # Default icon for future steps
             if status == terminal_status_failed:
                 # If failed, mark the step where it failed with ❌, others are just text
-                icon = "❌" if i == step else " " # Assume the last mapped step is where it failed
+                # Assuming the last mapped step is where it failed, or just mark all
+                 icon = "❌" if i <= step else " " # Mark current/past steps with X on failure
             elif status == terminal_status_success:
                  # If successful, all steps are complete
                  icon = "✅"
@@ -700,8 +727,10 @@ with tab_status:
                        st.error(f"Details: {st.session_state.error_message}")
              elif status == terminal_status_success:
                   st.success("✅ DebugIQ agents completed full cycle.")
-             elif status is not None: # Handle other potential terminal states not explicitly listed
+             elif status is not None and status != "Unknown": # Handle other potential terminal states not explicitly listed
                   st.info(f"Workflow finished with status: **{status}**")
+             elif status == "Unknown":
+                  st.info("Workflow status is unknown or not yet started.")
 
 
     # --- Polling Logic ---
@@ -724,6 +753,7 @@ with tab_status:
         try:
             # Call the backend API to get the latest status for the active issue ID
             # The make_api_request helper handles the URL formatting for workflow_status
+            # Ensure endpoint key matches ENDPOINTS
             status_response = make_api_request("GET", "workflow_status")
 
             if "error" not in status_response:
@@ -747,7 +777,7 @@ with tab_status:
                     st.session_state.workflow_completed = True # Set flag to stop polling
                     status_placeholder_workflow.empty() # Clear the live status message
                     logger.info(f"Workflow for issue {st.session_state.active_issue_id} reached terminal state: {current_status}. Polling stopped.")
-                    st.rerun() # Trigger a final rerun to display the completed state message clearly
+                    # No st.rerun() needed here usually, as the state change will trigger a final render
 
             else:
                 # Handle API request errors during polling (e.g., backend down, 404 for issue ID)
@@ -759,7 +789,7 @@ with tab_status:
                 st.session_state.error_message = status_response.get("error", "API Error during polling.")
                 status_placeholder_workflow.empty() # Clear the live status message
                 logger.error(f"API error while polling status for issue {st.session_state.active_issue_id}. Polling stopped.")
-                st.rerun() # Trigger a final rerun to show failure message
+                # No st.rerun() needed here usually
 
         except Exception as e:
              # Catch unexpected errors during the polling process
@@ -769,24 +799,31 @@ with tab_status:
              st.session_state.last_status = terminal_status_failed # Indicate failure state
              st.session_state.error_message = str(e) # Store the error message
              status_placeholder_workflow.empty() # Clear the live status message
-             st.rerun() # Trigger a final rerun
+             # No st.rerun() needed here usually
 
     # --- Display Final/Idle State ---
     # This block runs when polling is not active (initial load, after workflow completed, or on error)
+    # Display the appropriate status message using the dedicated placeholder
     else:
-        # If the workflow is completed (success or failure) and there was an active issue ID
-        if st.session_state.get("workflow_completed", True) and st.session_state.get("active_issue_id"):
-             # Display the final state using the last known status
-             status_placeholder_workflow.empty() # Ensure placeholder is empty before showing final state
-             show_agent_progress(st.session_state.get("last_status")) # Show progress bar based on final status
-             # The show_agent_progress function now handles displaying the final success/failure text
+        if st.session_state.get("active_issue_id") is None:
+             # No active issue ID set
+             status_placeholder_workflow.info("Enter an Issue ID or trigger a workflow to see status.")
+             # Ensure polling is off if no active ID
+             st.session_state.workflow_completed = True
+        elif st.session_state.get("workflow_completed", True):
+            # Workflow was completed or failed, display the final state using the last known status
+            status_placeholder_workflow.empty() # Ensure placeholder is empty before showing final state
+            show_agent_progress(st.session_state.get("last_status")) # Show progress bar based on final status
+            # The show_agent_progress function handles displaying the final success/failure text
 
-        # If no active issue ID is set (initial load or after clearing/resetting state)
-        elif st.session_state.get("active_issue_id") is None:
-            # Display the initial message using the dedicated placeholder
-            status_placeholder_workflow.info("Enter an Issue ID or trigger a workflow to see status.")
-            # Ensure polling is off if no active ID
-            st.session_state.workflow_completed = True
+        # If active_issue_id is set, but not polling (e.g., just entered manual ID, waiting for first poll)
+        # The `is_polling_active` check handles the "🔁 Live Status" display.
+        # This else block ensures something is shown when not actively polling.
+        # The 'Idle' state from the voice tab doesn't apply here.
+        # The initial info message should cover the case where active_issue_id is None.
+        # If active_issue_id is set but workflow_completed is True, the elif above handles it.
+        # No explicit action needed here if the logic above covers all states.
+        pass
 
 
 # === Metrics Tab ===
@@ -798,6 +835,7 @@ with tab_metrics:
     if st.button("📊 Fetch Metrics", key="metrics_fetch_btn"):
         with st.spinner("Fetching system metrics..."):
             # Call the backend API using the helper function (GET request, no payload)
+            # Ensure endpoint key matches ENDPOINTS
             response = make_api_request("GET", "system_metrics")
 
         if "error" not in response:
@@ -827,7 +865,7 @@ with tab_voice:
         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}, # STUN server config
         media_stream_constraints={"audio": True, "video": False}, # Audio only, no video
         audio_frame_callback=audio_frame_callback, # The callback function defined above
-        async_processing=True # Process frames asynchronously in a separate thread
+        async_processing=True # Process frames asynchronously
     )
 
     # --- Display Voice Agent Status ---
@@ -892,15 +930,18 @@ with tab_voice:
                 st.session_state.recording_status = "Sending for Transcription..."
                 status_placeholder_voice.info(f"Status: {st.session_state.recording_status}") # Update status here
                 transcribe_payload = {"audio_base64": encoded_audio}
+                # Ensure endpoint key matches ENDPOINTS
                 transcription_response = make_api_request("POST", "voice_transcribe", transcribe_payload)
 
+                # Check if make_api_request returned an error dict or the expected JSON
                 if "error" not in transcription_response:
                     transcribed_text = transcription_response.get("text", "Could not transcribe audio.")
                     st.session_state.recording_status = "Transcription Complete."
                     status_placeholder_voice.success(f"Transcription: {transcribed_text}") # Update status here
 
                     # Add user's voice input (transcribed text and original audio) to chat history
-                    st.session_state.chat_history.append({"role": "user", "content": transcribed_text, "audio": wav_bytes})
+                    # Add a 'processed' flag for text inputs, though not strictly needed for voice
+                    st.session_state.chat_history.append({"role": "user", "content": transcribed_text, "audio": wav_bytes, "processed": True}) # Mark voice as processed
 
                     # --- Send transcribed text to Gemini Chat ---
                     st.session_state.recording_status = "Sending to Gemini..."
@@ -908,6 +949,7 @@ with tab_voice:
                     with st.spinner("Getting response from Gemini..."):
                         # Send the transcribed text to Gemini. Backend interprets.
                         # Assumes backend /gemini/chat endpoint accepts {"text": "..."}
+                        # Ensure endpoint key matches ENDPOINTS
                         gemini_payload = {"text": transcribed_text}
                         gemini_response = make_api_request("POST", "gemini_chat", gemini_payload)
 
@@ -923,7 +965,7 @@ with tab_voice:
                                  ai_response_audio = base64.b64decode(ai_response_audio_base64)
                                  logger.info("Received AI audio response for voice query.")
                             except (base64.binascii.Error, TypeError) as e:
-                                 logger.error(f"Failed to decode base64 audio from backend (voice query): {e}")
+                                 logger.error(f"Failed to decode base64 audio from backend (voice query): {e}", exc_info=True)
                                  st.warning("Received audio response from backend, but failed to decode it.")
 
                         # Add AI response (text and optional audio) to chat history
@@ -953,7 +995,7 @@ with tab_voice:
                         # Add error message to chat history as an AI response for context
                         st.session_state.chat_history.append({
                             "role": "ai",
-                            "content": f"Error: Could not get AI response. {gemini_response['error']}",
+                            "content": f"Error: Could not get AI response. {gemini_response.get('error', 'Unknown error')}",
                             "audio": None
                         })
                         st.session_state.audio_buffer = [] # Clear buffer even on error
@@ -970,7 +1012,7 @@ with tab_voice:
                     # Add error message to chat history as a user message indicating transcription failed
                     st.session_state.chat_history.append({
                         "role": "user",
-                        "content": f"Error: Could not transcribe audio. {transcription_response['error']}",
+                        "content": f"Error: Could not transcribe audio. {transcription_response.get('error', 'Unknown error')}",
                         "audio": None # No successful audio to store
                     })
                     st.session_state.audio_buffer = [] # Clear buffer even on error
@@ -987,9 +1029,13 @@ with tab_voice:
                 st.rerun() # Rerun to update UI state
 
         # After attempting processing (whether successful or not), reset status if not already a final state
-        if st.session_state.recording_status in ["Processing Audio...", "Sending for Transcription...", "Sending to Gemini..."]:
-             st.session_state.recording_status = "Idle"
-             status_placeholder_voice.info("Status: Idle") # Update to Idle if no error occurred
+        # This will happen on the rerun after processing
+        # Check if recording is still off and buffer is clear, then reset status
+        if not st.session_state.is_recording and not st.session_state.audio_buffer:
+             if st.session_state.recording_status not in ["Transcription Complete.", "AI Response Received.", "Transcription Failed.", "AI Request Failed.", "Audio Processing Failed."]:
+                 # Only reset if the status is still in a transient processing state
+                 st.session_state.recording_status = "Idle"
+                 status_placeholder_voice.info("Status: Idle") # Update to Idle
 
 
     # --- Text Chat Input (Alternative to Voice) ---
@@ -1033,7 +1079,8 @@ with tab_voice:
              # Use a spinner while waiting for the Gemini response
              with st.spinner("Getting response from Gemini..."):
                  # Send the text query to Gemini Chat endpoint
-                 # Assumes backend /gemini/chat accepts {"text": "..."}
+                 # Assumes backend /gemini/chat endpoint accepts {"text": "..."}
+                 # Ensure endpoint key matches ENDPOINTS
                  gemini_payload = {"text": user_text_to_process}
                  gemini_response = make_api_request("POST", "gemini_chat", gemini_payload)
 
@@ -1052,7 +1099,7 @@ with tab_voice:
                           ai_response_audio = base64.b64decode(ai_response_audio_base64)
                           logger.info("Received AI audio response for text query.")
                      except (base64.binascii.Error, TypeError) as e:
-                          logger.error(f"Failed to decode base64 audio from backend (text query): {e}")
+                          logger.error(f"Failed to decode base64 audio from backend (text query): {e}", exc_info=True)
                           st.warning("Received audio response from backend, but failed to decode it.")
 
                  # Add AI response (text and optional audio) to chat history
@@ -1074,8 +1121,8 @@ with tab_voice:
                  # Add an error message to chat history as an AI response for context
                  st.session_state.chat_history.append({
                       "role": "ai",
-                      "content": f"Error: Could not get AI response. {gemini_response['error']}",
-                      "audio": None # No audio for an error message
+                      "content": f"Error: Could not get AI response. {gemini_response.get('error', 'Unknown error')}",
+                      "audio": None
                  })
                  st.rerun() # Trigger rerun to display the error message in chat history
 
@@ -1090,20 +1137,24 @@ with tab_voice:
         status_placeholder_voice.error(f"Status: {st.session_state.recording_status}")
         # Optionally add an error message to chat history here as well
 
+
     # --- Display Chat History ---
     st.markdown("---") # Separator before chat history
     st.subheader("Chat History")
     # Display chat messages in reverse order (latest first)
     # Iterate over a copy of the history to avoid issues if history is modified during iteration
-    for message in reversed(st.session_state.chat_history.copy()):
-        # Use st.chat_message for distinct user/AI styling
+    # Added key for chat messages to help Streamlit render updates efficiently
+    for i, message in enumerate(reversed(st.session_state.chat_history.copy())):
+        role = "🧑‍💻 User" if message["role"] == "user" else "🤖 AI"
+        # Use a unique key for each chat message element for stable rendering
+        message_key = f"chat_message_{len(st.session_state.chat_history) - 1 - i}"
         with st.chat_message(message["role"]):
             st.markdown(message["content"]) # Display the text content
             # Play audio if available and not None
             if message.get("audio") is not None:
                  try:
                      # Assumes the audio bytes are in WAV format
-                     st.audio(message["audio"], format='audio/wav')
+                     st.audio(message["audio"], format='audio/wav', key=f"{message_key}_audio") # Unique key for audio player
                  except Exception as e:
                      st.warning(f"Could not play audio: {e}")
-                     logger.error(f"Error playing audio in chat history: {e}")
+                     logger.error(f"Error playing audio in chat history: {e}", exc_info=True)
