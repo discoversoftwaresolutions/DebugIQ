@@ -9,7 +9,7 @@ from streamlit_autorefresh import st_autorefresh
 # --- Configuration ---
 PROJECT_NAME = "DebugIQ"
 # CORRECT THIS URL to your Railway backend's public HTTPS URL
-BACKEND_URL = "https://debugiq-backend.railway.app" # <--- CHANGE THIS
+BACKEND_URL=https://debugiq-backend-production.up.railway.app
 
 # ... rest of imports and sidebar ...
 
