@@ -1041,25 +1041,7 @@ with tab_voice:
                  status_placeholder_voice.info("Status: Idle") # Update to Idle
 
 
-    # --- Text Chat Input (Alternative to Voice) ---
-    st.markdown("---") # Separator
-    st.subheader("Text Chat")
-    # Text input for sending queries via text. Linked to session state.
-    st.text_input("Type your query here:", key="text_chat_input")
-    # Access the value directly from session state
-    text_query_input_value = st.session_state.text_chat_input
-
-    # Send Text Query button: disabled if input is empty
-    send_text_button_text = st.button("Send Text Query", key="send_text_btn", disabled=not text_query_input_value)
-
-    # If button is clicked and input has text
-    if send_text_button_text and text_query_input_value:
-        # Update status placeholder
-        st.session_state.recording_status = "Processing Text Query..."
-        status_placeholder_voice.info(f"Status: {st.session_state.recording_status}") # Update status here
-
-        # Add user's text message to chat history immediately
-        # Add a flag 'processed' to prevent reprocessing on subsequent reruns
+   
         st.session_state.chat_history.append({"role": "user", "content": text_query_input_value, "processed": False})
 
         # Clear the text input box after sending for good UX
@@ -1139,9 +1121,75 @@ with tab_voice:
         st.session_state.recording_status = "Text Processing Error."
         status_placeholder_voice.error(f"Status: {st.session_state.recording_status}")
         # Optionally add an error message to chat history here as well
+# Add a simple text input as an alternative way to chat if mic is not preferred
+st.markdown("---") # Separator before text input
+text_query = st.text_input("Type your query here:", key="text_chat_input")
+send_text_button = st.button("Send Text Query", key="send_text_btn")
+
+if send_text_button and text_query:
+    # Use make_api_request for the text query to the backend Gemini Chat endpoint
+    st.session_state.recording_status = "Processing Text Query..."
+    status_placeholder.info(f"Status: {st.session_state.recording_status}")
+
+    user_text = text_query
+    # Add user's text to chat history immediately
+    st.session_state.chat_history.append({"role": "user", "content": user_text})
+
+    # --- Send text query to Gemini Chat ---
+    ai_response_text = ""
+    ai_response_audio = None # To store TTS audio bytes
+
+    st.session_state.recording_status = "Sending to Gemini..."
+    status_placeholder.info(f"Status: {st.session_state.recording_status}")
+    with st.spinner("Getting response from Gemini..."):
+        # Send the text query to Gemini. Backend interprets.
+        gemini_payload = {"text": user_text}
+        # Use make_api_request with the endpoint key
+        gemini_response = make_api_request("POST", "gemini_chat", gemini_payload) # <--- Use endpoint key
+
+    if "error" not in gemini_response:
+        ai_response_text = gemini_response.get("response", "No response from Gemini.")
+        st.session_state.recording_status = "Gemini Response Received."
+
+        # --- Generate TTS for AI response ---
+        if ai_response_text:
+             st.session_state.recording_status = "Generating Speech..."
+             status_placeholder.info(f"Status: {st.session_state.recording_status}")
+             with st.spinner("Generating AI speech..."):
+                 tts_payload = {"text": ai_response_text}
+                 # Request raw audio bytes (return_json=False)
+                 # Use make_api_request with endpoint key, request bytes
+                 tts_response_data = make_api_request("POST", "tts", tts_payload, return_json=False) # <--- Use endpoint key
+
+             if not isinstance(tts_response_data, dict) or "error" not in tts_response_data:
+                 # Assuming tts_response_data is the raw WAV bytes
+                 ai_response_audio = tts_response_data
+                 st.session_state.recording_status = "Speech Generated."
+                 logger.info(f"Received TTS audio bytes, size: {len(ai_response_audio) if ai_response_audio else 0}")
+             else:
+                 ai_response_text += f"\n(TTS Error: {tts_response_data.get('error', 'Unknown TTS error')})"
+                 st.session_state.recording_status = "TTS Error."
+
+        else:
+             st.session_state.recording_status = "No AI text response for speech."
+
+    else:
+        ai_response_text = f"Error from Gemini: {gemini_response['error']}"
+        st.session_state.recording_status = "Gemini Error."
 
 
-    # --- Display Chat History ---
+    # Add AI's response (text and potentially audio) to chat history
+    if ai_response_text or ai_response_audio is not None: # Check explicitly for not None
+        # For text input, we don't have captured audio format info. Default sample rate is usually ok for st.audio.
+        st.session_state.chat_history.append({"role": "ai", "content": ai_response_text, "audio": ai_response_audio})
+
+
+    status_placeholder.info(f"Status: {st.session_state.recording_status}")
+
+    # Remove the problematic line: st.session_state.text_chat_input = ""
+    # Remove the redundant rerun call: st.rerun()
+
+# --- Display Chat History ---
     st.markdown("---") # Separator before chat history
     st.subheader("Chat History")
     # Display chat messages in reverse order (latest first)
