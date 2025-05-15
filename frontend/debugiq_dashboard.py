@@ -1128,10 +1128,9 @@ send_text_button = st.button("Send Text Query", key="send_text_btn")
 
 if send_text_button and text_query:
     # Use make_api_request for the text query to the backend Gemini Chat endpoint
-    st.session_state.recording_status = "Processing Text Query..."
-    status_placeholder.info(f"Status: {st.session_state.recording_status}")
-
-    user_text = text_query
+    st.session_state.recording_status = "Processing Text Query..."
+    status_placeholder.info(f"Status: {st.session_state.recording_status}")
+    user_text = text_query
     # Add user's text to chat history immediately
     st.session_state.chat_history.append({"role": "user", "content": user_text})
 
