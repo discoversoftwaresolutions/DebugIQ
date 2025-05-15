@@ -401,8 +401,8 @@ with tab_status:
                 icon = "✅" if i <= step else ("🔄" if i == step + 1 else "⏳")
                 st.markdown(f"{icon} {label}")
 
-    if st.session_state.active_issue_id and not st.session_state.workflow_completed:
-        logger.info(f"Polling status for issue: {st.session_state.active_issue_id}")
+   if st.session_state.get('active_issue_id') and not st.session_state.workflow_completed:
+       logger.info(f"Polling status for issue: {st.session_state.active_issue_id}")
         st_autorefresh(interval=2000, key=f"workflow-refresh-{st.session_state.active_issue_id}")
 
     if st.session_state.active_issue_id and not st.session_state.workflow_completed:
