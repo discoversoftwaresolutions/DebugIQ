@@ -244,7 +244,7 @@ if 'recording_status' not in st.session_state:
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = [] # Store list of {"role": "user" or "ai", "content": "...", "audio": b"..."}
 # No longer need last_audio_response as audio is stored in chat_history
-if 'status_message' not in st.session_state: # <--- Initialize status message state
+if 'status_message' not in st.session_state: # Initialize status message state
     st.session_state.status_message = "Status: Idle"
 
 
@@ -313,7 +313,8 @@ with tab_trace:
                 )
 
                 # Diff View (Original vs. Edited Patch)
-                st.markdown("### 🔍 Diff View (Original vs. Edited Patch)")
+                st.markdown("### 
+### 🔍 Diff View (Original vs. Edited Patch)")
                 # Check if both original code and edited patch are available
                 if edited_patch is not None and file_content is not None:
                     # Generate diff as HTML
@@ -507,6 +508,7 @@ with tab_status: # This is now the status/polling tab
 
     # --- Fetch and Display Status ---
     # This code runs on every rerun, including those triggered by autorefresh
+    # This IF block corresponds to the ELSE block below
     if st.session_state.active_issue_id and not st.session_state.workflow_completed: # Only fetch if active and not completed yet
         try:
             # Use make_api_request with the endpoint key - special handling in make_api_request for formatting
@@ -533,13 +535,15 @@ with tab_status: # This is now the status/polling tab
                     else: # Workflow Failed
                         st.error("❌ DebugIQ workflow failed.")
 
-            else:
-                # Handle API request errors (e.g., 404 if issue ID not found)
+            else: # Handle API request errors (e.g., 404 if issue ID not found)
+                # Handle the case where make_api_request returned an error dictionary
                 st.error(status_response["error"])
-                if "backend_detail" in status_response: st.json({"Backend Detail": status_response["backend_detail"]})
+                if "backend_detail" in status_response:
+                    st.json({"Backend Detail": status_response["backend_detail"]})
                 # Stop polling on API errors
                 st.session_state.workflow_completed = True
 
+    # This ELSE block corresponds to the IF block above
     else: # Display idle status if no issue ID is active or if workflow is completed
         if st.session_state.last_status: # Show final status if completed
              if st.session_state.last_status == terminal_status:
@@ -547,7 +551,7 @@ with tab_status: # This is now the status/polling tab
              elif st.session_state.last_status == failed_status:
                  st.error("❌ Workflow failed.")
                  # Display last known error message if available
-                 if "error_message" in st.session_state:
+                 if "error_message" in st.session_state: # Check session state for stored error
                      st.error(f"Last recorded error: {st.session_state.error_message}")
              else: # Handle other non-polling terminal states
                  st.info(f"Workflow finished with status: **{st.session_state.last_status}**")
@@ -663,14 +667,12 @@ if start_button:
         # Update the status message in session state
         st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
         # No clearing chat history here, allowing for conversation
-        # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
         st.rerun() # Rerun to update button states and status
     else:
         st.warning("Microphone stream is not active. Please allow microphone access and ensure the WebRTC component is initialized.")
         st.session_state.recording_status = "Idle" # Reset status
         # Update the status message in session state
         st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-        # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
 
 if stop_button:
@@ -678,7 +680,6 @@ if stop_button:
     st.session_state.recording_status = "Processing..."
     # Update the status message in session state
     st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-    # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
     # Process the recorded audio after stopping
     # Ensure buffer is processed in a thread-safe manner
@@ -704,7 +705,6 @@ if stop_button:
             st.session_state.recording_status = "Transcribing..."
             # Update the status message in session state
             st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-            # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
             with st.spinner("Transcribing audio..."):
                 transcription_payload = {"audio_base64": audio_base64}
                 # Use make_api_request with endpoint key
@@ -721,7 +721,6 @@ if stop_button:
                 st.session_state.recording_status = "Transcription Error."
             # Update the status message in session state
             st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-            # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
 
             # Add user's transcription to chat history (only if valid)
@@ -737,7 +736,6 @@ if stop_button:
                 st.session_state.recording_status = "Sending to Gemini..."
                 # Update the status message in session state
                 st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-                # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
                 with st.spinner("Getting response from Gemini..."):
                     # Send the transcribed text to Gemini. The backend needs to interpret this.
                     gemini_payload = {"text": user_text}
@@ -754,7 +752,6 @@ if stop_button:
                         st.session_state.recording_status = "Generating Speech..."
                         # Update the status message in session state
                         st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-                        # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
                         with st.spinner("Generating AI speech..."):
                             tts_payload = {"text": ai_response_text}
                             # Request raw audio bytes (return_json=False) from backend TTS endpoint
@@ -773,14 +770,12 @@ if stop_button:
                             st.session_state.recording_status = "TTS Error."
                         # Update the status message in session state
                         st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-                        # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
 
                     else:
                         st.session_state.recording_status = "No AI text response for speech."
                         # Update the status message in session state
                         st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-                        # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
 
                 else:
@@ -789,7 +784,6 @@ if stop_button:
                     st.session_state.recording_status = "Gemini Error."
                     # Update the status message in session state
                     st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-                    # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
 
             elif user_text.startswith("Transcription Error"):
@@ -797,13 +791,11 @@ if stop_button:
                 st.session_state.recording_status = "Processing failed."
                 # Update the status message in session state
                 st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-                # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
             else:
                 # ... empty transcription ...
                 st.session_state.recording_status = "Processing failed."
                 # Update the status message in session state
                 st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-                # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
 
             # Add AI's response (text and potentially audio) to chat history
@@ -817,19 +809,16 @@ if stop_button:
 
             # Update the status message in session state one last time after all processing
             st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-            # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
         else:
             st.session_state.recording_status = "Failed to process audio."
             # Update the status message in session state
             st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-            # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
     else:
         st.session_state.recording_status = "No audio recorded."
         # Update the status message in session state
         st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-        # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
 
     # Ensure buffer is cleared after processing
@@ -837,7 +826,7 @@ if stop_button:
          st.session_state.audio_buffer = [] # Clear buffer after processing attempt
     st.session_state.pop('audio_format', None) # Clear audio format info after processing attempt
     # Trigger a rerun to update the chat history display (handled by button press)
-    # st.rerun() # <--- REMOVED THIS REDUNDANT LINE
+    # st.rerun() # Redundant
 
 
 # Add a simple text input as an alternative way to chat if mic is not preferred
@@ -850,7 +839,6 @@ if send_text_button and text_query:
     st.session_state.recording_status = "Processing Text Query..."
     # Update the status message in session state
     st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-    # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
     user_text = text_query
     # Add user's text to chat history immediately
@@ -864,7 +852,6 @@ if send_text_button and text_query:
     st.session_state.recording_status = "Sending to Gemini..."
     # Update the status message in session state
     st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-    # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
     with st.spinner("Getting response from Gemini..."):
         # Send the text query to Gemini. Backend interprets.
         gemini_payload = {"text": user_text}
@@ -881,7 +868,6 @@ if send_text_button and text_query:
             st.session_state.recording_status = "Generating Speech..."
             # Update the status message in session state
             st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-            # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
             with st.spinner("Generating AI speech..."):
                 tts_payload = {"text": ai_response_text}
                 # Request raw audio bytes (return_json=False)
@@ -899,20 +885,17 @@ if send_text_button and text_query:
                 st.session_state.recording_status = "TTS Error."
             # Update the status message in session state
             st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-            # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
         else:
             st.session_state.recording_status = "No AI text response for speech."
             # Update the status message in session state
             st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-            # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
     else:
         ai_response_text = f"Error from Gemini: {gemini_response['error']}"
         st.session_state.recording_status = "Gemini Error."
         # Update the status message in session state
         st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-        # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
 
     # Add AI's response (text and potentially audio) to chat history
@@ -923,12 +906,12 @@ if send_text_button and text_query:
 
     # Update the status message in session state one last time after all processing
     st.session_state.status_message = f"Status: {st.session_state.recording_status}" # <--- Update session state
-    # status_placeholder.info(f"Status: {st.session_state.recording_status}") # <--- REMOVE OR COMMENT OUT THIS LINE
 
     # Clear the text input after sending (handled by Streamlit's key mechanism)
-    # st.session_state.text_chat_input = "" # <--- REMOVED THIS PROBLEMATIC LINE
+    # st.session_state.text_chat_input = "" # REMOVED THIS PROBLEMATIC LINE
     # Trigger a rerun to update the chat history display (handled by button press)
-    # st.rerun() # <--- REMOVED THIS REDUNDANT LINE
+    # st.rerun() # REMOVED THIS REDUNDANT LINE
+
 
 # === Debugging/Development Info (Optional) ===
 # st.sidebar.markdown("---")
