@@ -401,10 +401,15 @@ with tab_status:
                 icon = "✅" if i <= step else ("🔄" if i == step + 1 else "⏳")
                 st.markdown(f"{icon} {label}")
 
+    # Polling logic (autorefresh only if an issue is active and workflow not complete)
+    # Corrected the if condition in the previous turn
     if st.session_state.get('active_issue_id') and not st.session_state.workflow_completed:
-       logger.info(f"Polling status for issue: {st.session_state.active_issue_id}")
-        st_autorefresh(interval=2000, key=f"workflow-refresh-{st.session_state.active_issue_id}")
+        logger.info(f"Polling status for issue: {st.session_state.get('active_issue_id')}") # Ensure this also uses .get() if it didn't before
+        # Corrected indentation for st_autorefresh
+        st_autorefresh(interval=2000, key=f"workflow-refresh-{st.session_state.active_issue_id}") # <--- Corrected line 406 indentation
 
+    # --- Fetch and Display Status ---
+    # ... rest of the block starting with if st.session_state.active_issue_id ...
     if st.session_state.active_issue_id and not st.session_state.workflow_completed:
         try:
             status_response = make_api_request("GET", "workflow_status")
