@@ -558,7 +558,7 @@ with tab_status: # This is now the status/polling tab
       if st.session_state.get('last_status'): # Show final status if completed
           if st.session_state.last_status == terminal_status:
                  st.success("✅ Workflow completed.")
-             elif st.session_state.last_status == failed_status:
+            elif st.session_state.last_status == failed_status:
                  st.error("❌ Workflow failed.")
                  if "error_message" in st.session_state:
                      st.error(f"Last recorded error: {st.session_state.error_message}")
