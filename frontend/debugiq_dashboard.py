@@ -1130,81 +1130,74 @@ if send_text_button and text_query:
     # Use make_api_request for the text query to the backend Gemini Chat endpoint
     st.session_state.recording_status = "Processing Text Query..."
     status_placeholder.info(f"Status: {st.session_state.recording_status}")
-    user_text = text_query
-    # Add user's text to chat history immediately
-    st.session_state.chat_history.append({"role": "user", "content": user_text})
+user_text = text_query
+# Add user's text to chat history immediately
+st.session_state.chat_history.append({"role": "user", "content": user_text})
 
-    # --- Send text query to Gemini Chat ---
-    ai_response_text = ""
-    ai_response_audio = None # To store TTS audio bytes
+# --- Send text query to Gemini Chat ---
+ai_response_text = ""
+ai_response_audio = None  # To store TTS audio bytes
 
-    st.session_state.recording_status = "Sending to Gemini..."
-    status_placeholder.info(f"Status: {st.session_state.recording_status}")
-    with st.spinner("Getting response from Gemini..."):
-        # Send the text query to Gemini. Backend interprets.
-        gemini_payload = {"text": user_text}
-        # Use make_api_request with the endpoint key
-        gemini_response = make_api_request("POST", "gemini_chat", gemini_payload) # <--- Use endpoint key
+st.session_state.recording_status = "Sending to Gemini..."
+status_placeholder.info(f"Status: {st.session_state.recording_status}")
+with st.spinner("Getting response from Gemini..."):
+    # Send the text query to Gemini. Backend interprets.
+    gemini_payload = {"text": user_text}
+    # Use make_api_request with the endpoint key
+    gemini_response = make_api_request("POST", "gemini_chat", gemini_payload)  # <--- Use endpoint key
 
-    if "error" not in gemini_response:
-        ai_response_text = gemini_response.get("response", "No response from Gemini.")
-        st.session_state.recording_status = "Gemini Response Received."
+if gemini_response and "error" not in gemini_response:
+    ai_response_text = gemini_response.get("response", "No response from Gemini.")
+    st.session_state.recording_status = "Gemini Response Received."
 
-        # --- Generate TTS for AI response ---
-        if ai_response_text:
-             st.session_state.recording_status = "Generating Speech..."
-             status_placeholder.info(f"Status: {st.session_state.recording_status}")
-             with st.spinner("Generating AI speech..."):
-                 tts_payload = {"text": ai_response_text}
-                 # Request raw audio bytes (return_json=False)
-                 # Use make_api_request with endpoint key, request bytes
-                 tts_response_data = make_api_request("POST", "tts", tts_payload, return_json=False) # <--- Use endpoint key
+    # --- Generate TTS for AI response ---
+    if ai_response_text:
+        st.session_state.recording_status = "Generating Speech..."
+        status_placeholder.info(f"Status: {st.session_state.recording_status}")
+        with st.spinner("Generating AI speech..."):
+            tts_payload = {"text": ai_response_text}
+            # Request raw audio bytes (return_json=False)
+            # Use make_api_request with endpoint key, request bytes
+            tts_response_data = make_api_request("POST", "tts", tts_payload, return_json=False)  # <--- Use endpoint key
 
-             if not isinstance(tts_response_data, dict) or "error" not in tts_response_data:
-                 # Assuming tts_response_data is the raw WAV bytes
-                 ai_response_audio = tts_response_data
-                 st.session_state.recording_status = "Speech Generated."
-                 logger.info(f"Received TTS audio bytes, size: {len(ai_response_audio) if ai_response_audio else 0}")
-             else:
-                 ai_response_text += f"\n(TTS Error: {tts_response_data.get('error', 'Unknown TTS error')})"
-                 st.session_state.recording_status = "TTS Error."
+        if tts_response_data and (not isinstance(tts_response_data, dict) or "error" not in tts_response_data):
+            # Assuming tts_response_data is the raw WAV bytes
+            ai_response_audio = tts_response_data
+            st.session_state.recording_status = "Speech Generated."
+            logger.info(f"Received TTS audio bytes, size: {len(ai_response_audio) if ai_response_audio else 0}")
+        else:
+            ai_response_text += f"\n(TTS Error: {tts_response_data.get('error', 'Unknown TTS error')})"
+            st.session_state.recording_status = "TTS Error."
+    else:
+        st.session_state.recording_status = "No AI text response for speech."
+else:
+    ai_response_text = f"Error from Gemini: {gemini_response.get('error', 'Unknown error')}"
+    st.session_state.recording_status = "Gemini Error."
 
-        else:
-             st.session_state.recording_status = "No AI text response for speech."
+# Add AI's response (text and potentially audio) to chat history
+if ai_response_text or ai_response_audio is not None:  # Check explicitly for not None
+    # For text input, we don't have captured audio format info. Default sample rate is usually ok for st.audio.
+    st.session_state.chat_history.append({"role": "ai", "content": ai_response_text, "audio": ai_response_audio})
 
-    else:
-        ai_response_text = f"Error from Gemini: {gemini_response['error']}"
-        st.session_state.recording_status = "Gemini Error."
-
-
-    # Add AI's response (text and potentially audio) to chat history
-    if ai_response_text or ai_response_audio is not None: # Check explicitly for not None
-        # For text input, we don't have captured audio format info. Default sample rate is usually ok for st.audio.
-        st.session_state.chat_history.append({"role": "ai", "content": ai_response_text, "audio": ai_response_audio})
-
-
-    status_placeholder.info(f"Status: {st.session_state.recording_status}")
-
-    # Remove the problematic line: st.session_state.text_chat_input = ""
-    # Remove the redundant rerun call: st.rerun()
+status_placeholder.info(f"Status: {st.session_state.recording_status}")
 
 # --- Display Chat History ---
-    st.markdown("---") # Separator before chat history
-    st.subheader("Chat History")
-    # Display chat messages in reverse order (latest first)
-    # Iterate over a copy of the history to avoid issues if history is modified during iteration
-    # Added key for chat messages to help Streamlit render updates efficiently
-    for i, message in enumerate(reversed(st.session_state.chat_history.copy())):
-        role = "🧑‍💻 User" if message["role"] == "user" else "🤖 AI"
-        # Use a unique key for each chat message element for stable rendering
-        message_key = f"chat_message_{len(st.session_state.chat_history) - 1 - i}"
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"]) # Display the text content
-            # Play audio if available and not None
-            if message.get("audio") is not None:
-                 try:
-                     # Assumes the audio bytes are in WAV format
-                     st.audio(message["audio"], format='audio/wav', key=f"{message_key}_audio") # Unique key for audio player
-                 except Exception as e:
-                     st.warning(f"Could not play audio: {e}")
-                     logger.error(f"Error playing audio in chat history: {e}", exc_info=True)
+st.markdown("---")  # Separator before chat history
+st.subheader("Chat History")
+# Display chat messages in reverse order (latest first)
+# Iterate over a copy of the history to avoid issues if history is modified during iteration
+# Added key for chat messages to help Streamlit render updates efficiently
+for i, message in enumerate(reversed(st.session_state.chat_history.copy())):
+    role = "🧑‍💻 User" if message["role"] == "user" else "🤖 AI"
+    # Use a unique key for each chat message element for stable rendering
+    message_key = f"chat_message_{len(st.session_state.chat_history) - 1 - i}"
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])  # Display the text content
+        # Play audio if available and not None
+        if message.get("audio") is not None:
+            try:
+                # Assumes the audio bytes are in WAV format
+                st.audio(message["audio"], format='audio/wav', key=f"{message_key}_audio")  # Unique key for audio player
+            except Exception as e:
+                st.warning(f"Could not play audio: {e}")
+                logger.error(f"Error playing audio in chat history: {e}", exc_info=True)
