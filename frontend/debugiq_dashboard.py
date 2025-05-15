@@ -410,7 +410,7 @@ with tab_status:
 
     # --- Fetch and Display Status ---
     # ... rest of the block starting with if st.session_state.active_issue_id ...
-   if st.session_state.get('active_issue_id') and not st.session_state.workflow_completed:
+    if st.session_state.get('active_issue_id') and not st.session_state.workflow_completed:
        try:
             status_response = make_api_request("GET", "workflow_status")
             if "error" not in status_response:
