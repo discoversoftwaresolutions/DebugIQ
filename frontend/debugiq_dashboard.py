@@ -555,8 +555,8 @@ with tab_status: # This is now the status/polling tab
     # This ELSE block corresponds to the IF block above
     else: # Display idle status if no issue ID is active or if workflow is completed
         # Ensure indentation within this else block is correct relative to the else: line
-        if st.session_state.last_status:
-             if st.session_state.last_status == terminal_status:
+      if st.session_state.get('last_status'): # Show final status if completed
+          if st.session_state.last_status == terminal_status:
                  st.success("✅ Workflow completed.")
              elif st.session_state.last_status == failed_status:
                  st.error("❌ Workflow failed.")
