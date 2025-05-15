@@ -50,13 +50,13 @@ ENDPOINTS = {
 # === Helper Functions ===
 # Modified make_api_request to construct the full URL from BACKEND_URL and path
 def make_api_request(method, endpoint_key, payload=None, return_json=True): # Takes endpoint_key, not full url
-    """Makes an API request to the backend."""
+   def make_api_request(method, endpoint_key, payload=None, return_json=True):  # Takes endpoint_key, not full url
+    """Makes an API request to the backend."""
     # Ensure endpoint_key exists in ENDPOINTS
     if endpoint_key not in ENDPOINTS:
         logger.error(f"Invalid endpoint key: {endpoint_key}")
         return {"error": f"Frontend configuration error: Invalid endpoint key '{endpoint_key}'."}
-
-    # Handle endpoints that require formatting (like workflow_status)
+        # Handle endpoints that require formatting (like workflow_status)
     path_template = ENDPOINTS[endpoint_key]
 
     # --- Construct the path ---
