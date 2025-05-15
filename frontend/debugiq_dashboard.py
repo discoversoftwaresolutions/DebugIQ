@@ -366,8 +366,7 @@ with tab_status:
         st.session_state.active_issue_id = issue_id_for_polling
         st.session_state.workflow_completed = False
 
-    st.write("Checking status for Issue ID:", st.session_state.active_issue_id or "None (Trigger workflow or enter ID above)")
-
+    st.write("Checking status for Issue ID:", st.session_state.get('active_issue_id') or "None (Trigger workflow or enter ID above)")
     progress_labels = [
         "🧾 Fetching Details",
         "🕵️ Diagnosis",
