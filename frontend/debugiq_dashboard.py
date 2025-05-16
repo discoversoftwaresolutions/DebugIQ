@@ -187,12 +187,14 @@ if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 if 'status_message' not in st.session_state:
     st.session_state.status_message = "Status: Idle"
-if 'last_status' not in st.session_state: # Initialize last_status
+if 'last_status' not in st.session_state:
     st.session_state.last_status = None
-if 'active_issue_id' not in st.session_state: # Initialize active_issue_id
+if 'active_issue_id' not in st.session_state:
     st.session_state.active_issue_id = None
-if 'workflow_completed' not in st.session_state: # Initialize workflow_completed
+if 'workflow_completed' not in st.session_state:
     st.session_state.workflow_completed = True
+if 'error_message' not in st.session_state:
+     st.session_state.error_message = None
 
 st.sidebar.header("📦 GitHub Integration")
 github_url = st.sidebar.text_input("GitHub Repository URL", placeholder="https://github.com/owner/repo", key="sidebar_github_url")
@@ -412,7 +414,7 @@ with tab_status:
 
                 if error_message:
                     st.error(f"Workflow Error: {error_message}")
-                    st.session_state.error_message = error_message # Store error message
+                    st.session_state.error_message = error_message
 
                 show_agent_progress(current_status)
 
@@ -429,29 +431,29 @@ with tab_status:
                     st.json({"Backend Detail": status_response["backend_detail"]})
                 st.session_state.workflow_completed = True
                 if "error" in status_response:
-                     st.session_state.error_message = status_response["error"] # Store API error
+                     st.session_state.error_message = status_response["error"]
 
         except Exception as e:
             logger.error(f"API request failed during status check: {e}")
             st.error(f"Error fetching workflow status: {e}")
             st.session_state.workflow_completed = True
-            st.session_state.error_message = str(e) # Store exception error
+            st.session_state.error_message = str(e)
 
     else:
-      if st.session_state.get('last_status'):
-        if st.session_state.last_status == terminal_status:
-             st.success("✅ Workflow completed.")
-        elif st.session_state.last_status == failed_status:
-             st.error("❌ Workflow failed.")
-             if "error_message" in st.session_state:
-                  st.error(f"Last recorded error: {st.session_state.error_message}")
+        if st.session_state.last_status:
+            if st.session_state.last_status == terminal_status:
+                st.success("✅ Workflow completed.")
+            elif st.session_state.last_status == failed_status:
+                st.error("❌ Workflow failed.")
+                if "error_message" in st.session_state:
+                    st.error(f"Last recorded error: {st.session_state.error_message}")
+            else:
+                st.info(f"Workflow finished with status: **{st.session_state.last_status}**")
+            show_agent_progress(st.session_state.last_status)
         else:
-             st.info(f"Workflow finished with status: **{st.session_state.last_status}**")
-        show_agent_progress(st.session_state.last_status)
-      else:
-          st.info("Enter an Issue ID or trigger a workflow to see status.")
-      # This line was causing the error and should be inside the condition or removed if logic is handled
-      # st.session_state.workflow_completed = True # Moved this logic inside the polling block
+            st.info("Enter an Issue ID or trigger a workflow to see status.")
+        st.session_state.workflow_completed = True
+
 
 with tab_metrics:
     st.header("📈 System Metrics")
@@ -469,7 +471,7 @@ with tab_metrics:
             if "backend_detail" in response: st.json({"Backend Detail": response["backend_detail"]})
 
 
-with tab_voice: # Added Voice Agent as a dedicated tab
+with tab_voice:
     st.header("🎙️ DebugIQ Voice Agent")
     st.write("Interact conversationally with DebugIQ using your voice or text. Ask questions or give commands related to debugging tasks.")
     st.write("You can ask things like: 'Analyze the traceback', 'Generate documentation for this code', or ask general programming questions.")
@@ -483,17 +485,15 @@ with tab_voice: # Added Voice Agent as a dedicated tab
                 if isinstance(message['audio'], bytes):
                     audio_hash = base64.b64encode(message['audio']).decode('utf-8')[:10]
                     try:
-                         st.audio(message['audio'], format='audio/wav', sample_rate=message.get('sample_rate', 44100), key=f"audio_{audio_hash}")
+                        st.audio(message['audio'], format='audio/wav', sample_rate=message.get('sample_rate', 44100), key=f"audio_{audio_hash}")
                     except Exception as e:
                          st.warning(f"Could not play audio: {e}")
                 else:
                     st.warning("AI audio response is not in bytes format.")
 
-    # Input area for voice and text
     col1, col2 = st.columns([1, 5])
 
     with col1:
-        # WebRTC streamer for audio input
         webrtc_ctx = webrtc_streamer(
             key="voice_input",
             mode=WebRtcMode.SENDONLY,
@@ -505,26 +505,20 @@ with tab_voice: # Added Voice Agent as a dedicated tab
             st.session_state.recording_status = "Recording..."
             st.session_state.is_recording = True
         else:
-            # Only process audio buffer if recording just stopped
             if st.session_state.is_recording and st.session_state.audio_buffer:
                 st.session_state.recording_status = "Processing..."
-                st.session_state.is_recording = False # Ensure it's set to False immediately
+                st.session_state.is_recording = False
 
                 with st.spinner("Processing audio..."):
                     audio_bytes = None
                     with st.session_state.audio_buffer_lock:
-                        # Use stored format info if available, otherwise fallback
                         audio_format = st.session_state.get('audio_format', {'sample_rate': 44100, 'format_name': 's16', 'channels': 1, 'sample_width_bytes': 2})
-                        # Reconstruct dummy frames with known format if processing requires format info
-                        # A better approach might pass format directly to frames_to_wav_bytes if needed
-                        # For now, assuming frames_to_wav_bytes can work with the frame objects directly
                         audio_bytes = frames_to_wav_bytes(st.session_state.audio_buffer)
 
                     if audio_bytes:
-                        st.session_state.audio_buffer = [] # Clear the buffer after processing
+                        st.session_state.audio_buffer = []
                         st.session_state.recording_status = "Transcribing..."
 
-                        # Send audio to backend for transcription
                         transcribe_response = make_api_request("POST", "voice_transcribe", payload={"audio_base64": base64.b64encode(audio_bytes).decode('utf-8')})
 
                         if "error" not in transcribe_response:
@@ -532,23 +526,20 @@ with tab_voice: # Added Voice Agent as a dedicated tab
                             if transcribed_text:
                                 st.session_state.chat_history.append({"role": "user", "content": transcribed_text, "audio": audio_bytes})
                                 st.session_state.recording_status = "Thinking..."
-                                # Send transcribed text to Gemini chat
                                 chat_response = make_api_request("POST", "gemini_chat", payload={"query": transcribed_text, "history": st.session_state.chat_history})
 
                                 if "error" not in chat_response:
                                     ai_response_text = chat_response.get("response", "Sorry, I couldn't generate a response.")
                                     st.session_state.recording_status = "Synthesizing speech..."
 
-                                    # Get TTS audio for the AI response
                                     tts_response = make_api_request("POST", "tts", payload={"text": ai_response_text}, return_json=False)
 
                                     if "error" not in tts_response:
-                                         # Store text and audio for AI response
                                          st.session_state.chat_history.append({
                                              "role": "ai",
                                              "content": ai_response_text,
-                                             "audio": tts_response, # This should be the audio bytes
-                                             "sample_rate": 44100 # Assuming a standard sample rate for TTS
+                                             "audio": tts_response,
+                                             "sample_rate": 44100
                                              })
                                     else:
                                         st.session_state.chat_history.append({"role": "ai", "content": f"{ai_response_text} (Audio error: {tts_response['error']})", "audio": None})
@@ -566,7 +557,6 @@ with tab_voice: # Added Voice Agent as a dedicated tab
                     else:
                         st.error("Failed to convert audio frames to WAV.")
                         st.session_state.chat_history.append({"role": "user", "content": "(Audio processing failed)"})
-
 
             st.session_state.recording_status = "Idle"
 
