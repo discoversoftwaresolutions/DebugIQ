@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 # === Backend Constants ===
 # Use environment variable for the backend URL, with a fallback
 # Set BACKEND_URL environment variable in Railway frontend settings
-BACKEND_URL = os.getenv("BACKEND_URL", "https://debugiq-backend.railway.app") # <-- Ensure this fallback is correct or use env var
+# *** UPDATED FALLBACK URL TO PRODUCTION ADDRESS ***
+BACKEND_URL = os.getenv("BACKEND_URL", "https://debugiq-backend-production.up.railway.app")
 
 # Define API endpoint paths relative to BACKEND_URL
 ENDPOINTS = {
